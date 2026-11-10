@@ -22,33 +22,35 @@ Essential and Professional are named-user licenses. The official site currently 
 
 This table reproduces every capability in Spine's published Trial/Essential/Professional comparison. “Limited” means the capability works only when the project does not contain Professional-only features.
 
-| Feature | Free Trial | Essential | Professional | Description |
-| --- | :---: | :---: | :---: | --- |
-| Physics constraint | Yes | No | Yes | Simulates dynamic secondary motion on bones, including inertia, strength, damping, mass, wind, and gravity. Useful for hair, clothing, tails, and other elements that should react automatically. |
-| Meshes | Yes | No | Yes | Replaces a rectangular image region with a custom polygon. This can avoid drawing transparent pixels and provides geometry for deformation and weighting. |
-| Deformation | Yes | No | Yes | Keys individual mesh vertices so artwork can bend, squash, stretch, and change shape without requiring a new source image for every frame. Also known historically as free-form deformation or FFD. |
-| Weights | Yes | No | Yes | Binds each mesh vertex to one or more bones. Moving the bones then deforms the image automatically according to the vertex weights. |
-| Clipping | Yes | No | Yes | Uses a polygon to restrict where selected attachments are drawn. Spine 4.3 also supports inverse clipping. |
-| IK constraint | Yes | Yes | Yes | Uses inverse kinematics to rotate a chain of bones toward a target, making limbs and grounded feet easier to pose. The current purchase matrix marks IK as available in Essential. |
-| Transform constraint | Yes | No | Yes | Maps or copies rotation, translation, scale, or shear from one bone to other bones for automated and reusable rig behavior. |
-| Path constraint | Yes | No | Yes | Makes bones follow a Bezier path and optionally controls their spacing, rotation, and scale along that path. |
-| Audio | Yes | No | Yes | Synchronizes MP3, OGG, or WAV audio with an animation for timing, dialogue, or lip-sync work. |
-| Open Project | Yes | Limited | Yes | Opens an existing Spine project. Essential can inspect projects containing Professional data, but cannot save or export them while that unsupported data remains. |
-| Save Project | No | Limited | Yes | Writes the editable Spine project. Essential can save only Essential-compatible projects. |
-| Export Data | No | Limited | Yes | Exports skeleton and animation data in Spine JSON or compact binary format. Essential can export only Essential-compatible projects. |
-| Export Images | No | Limited | Yes | Exports a still image or animation as GIF, JPEG, or PNG/image sequences. Essential can export only Essential-compatible projects. |
-| Export Video | No | Limited | Yes | Exports animations as AVI or QuickTime video. Essential can export only Essential-compatible projects. |
-| Texture Packer | No | Yes | Yes | Packs source images into a texture atlas for efficient runtime rendering or into a spritesheet for conventional sprite animation. Features include whitespace stripping, rotation, and scaling. |
-| Import Data | Yes | Yes | Yes | Imports compatible Spine JSON or binary skeleton/animation data, including data produced by external tools that implement Spine's documented formats. |
-| Import Project | Yes | Yes | Yes | Merges content from another Spine project into the current project. |
-| Ghosting | Yes | Yes | Yes | Draws frames before and after the current frame so arcs, spacing, and animation flow can be evaluated without repeatedly scrubbing playback. |
-| Auto Key | Yes | Yes | Yes | Automatically creates keys when the skeleton pose changes in Animate mode. |
-| Bounding boxes | Yes | Yes | Yes | Attaches polygonal metadata to bones for runtime hit detection, physics integration, UI regions, and other application-defined uses. |
-| Skins | Yes | Yes | Yes | Organizes alternative attachment sets so one skeleton and its animations can drive different characters, outfits, weapons, or visual variants. Advanced skin bones and skin constraints depend on Professional-only rigging features. |
-| Graph | Yes | Yes | Yes | Edits stepped, linear, and Bezier interpolation curves between keys for precise control over acceleration, overshoot, easing, and motion quality. |
-| Dopesheet | Yes | Yes | Yes | Displays animation timelines and keys together for timing edits, copying, scaling, and retiming. |
-| Bone/Image Compensation | Yes | Yes | Yes | Keeps selected child bones or images visually in place while their parent is transformed, making rig setup and correction easier. |
-| Posing | Yes | Yes | Yes | Provides the Pose tool for quickly positioning a skeleton using temporary multi-bone IK-style manipulation. This is distinct from storing an IK constraint in the rig. |
+**LayerForge checklist:** ✅ means the core workflow is implemented as an interactive prototype. ❌ means it is not implemented end-to-end; a visual preview, disabled action, or placeholder UI may still be present.
+
+| Feature | Free Trial | Essential | Professional | LayerForge | Description |
+| --- | :---: | :---: | :---: | :---: | --- |
+| Physics constraint | Yes | No | Yes | ✅ | Simulates dynamic secondary motion on bones, including inertia, strength, damping, mass, wind, and gravity. Useful for hair, clothing, tails, and other elements that should react automatically. |
+| Meshes | Yes | No | Yes | ❌ | Replaces a rectangular image region with a custom polygon. This can avoid drawing transparent pixels and provides geometry for deformation and weighting. |
+| Deformation | Yes | No | Yes | ❌ | Keys individual mesh vertices so artwork can bend, squash, stretch, and change shape without requiring a new source image for every frame. Also known historically as free-form deformation or FFD. |
+| Weights | Yes | No | Yes | ❌ | Binds each mesh vertex to one or more bones. Moving the bones then deforms the image automatically according to the vertex weights. |
+| Clipping | Yes | No | Yes | ❌ | Uses a polygon to restrict where selected attachments are drawn. Spine 4.3 also supports inverse clipping. |
+| IK constraint | Yes | Yes | Yes | ❌ | Uses inverse kinematics to rotate a chain of bones toward a target, making limbs and grounded feet easier to pose. The current purchase matrix marks IK as available in Essential. |
+| Transform constraint | Yes | No | Yes | ❌ | Maps or copies rotation, translation, scale, or shear from one bone to other bones for automated and reusable rig behavior. |
+| Path constraint | Yes | No | Yes | ❌ | Makes bones follow a Bezier path and optionally controls their spacing, rotation, and scale along that path. |
+| Audio | Yes | No | Yes | ❌ | Synchronizes MP3, OGG, or WAV audio with an animation for timing, dialogue, or lip-sync work. |
+| Open Project | Yes | Limited | Yes | ❌ | Opens an existing Spine project. Essential can inspect projects containing Professional data, but cannot save or export them while that unsupported data remains. |
+| Save Project | No | Limited | Yes | ❌ | Writes the editable Spine project. Essential can save only Essential-compatible projects. |
+| Export Data | No | Limited | Yes | ❌ | Exports skeleton and animation data in Spine JSON or compact binary format. Essential can export only Essential-compatible projects. |
+| Export Images | No | Limited | Yes | ❌ | Exports a still image or animation as GIF, JPEG, or PNG/image sequences. Essential can export only Essential-compatible projects. |
+| Export Video | No | Limited | Yes | ❌ | Exports animations as AVI or QuickTime video. Essential can export only Essential-compatible projects. |
+| Texture Packer | No | Yes | Yes | ❌ | Packs source images into a texture atlas for efficient runtime rendering or into a spritesheet for conventional sprite animation. Features include whitespace stripping, rotation, and scaling. |
+| Import Data | Yes | Yes | Yes | ❌ | Imports compatible Spine JSON or binary skeleton/animation data, including data produced by external tools that implement Spine's documented formats. |
+| Import Project | Yes | Yes | Yes | ❌ | Merges content from another Spine project into the current project. |
+| Ghosting | Yes | Yes | Yes | ✅ | Draws frames before and after the current frame so arcs, spacing, and animation flow can be evaluated without repeatedly scrubbing playback. |
+| Auto Key | Yes | Yes | Yes | ✅ | Automatically creates keys when the skeleton pose changes in Animate mode. |
+| Bounding boxes | Yes | Yes | Yes | ❌ | Attaches polygonal metadata to bones for runtime hit detection, physics integration, UI regions, and other application-defined uses. |
+| Skins | Yes | Yes | Yes | ✅ | Organizes alternative attachment sets so one skeleton and its animations can drive different characters, outfits, weapons, or visual variants. Advanced skin bones and skin constraints depend on Professional-only rigging features. |
+| Graph | Yes | Yes | Yes | ✅ | Edits stepped, linear, and Bezier interpolation curves between keys for precise control over acceleration, overshoot, easing, and motion quality. |
+| Dopesheet | Yes | Yes | Yes | ✅ | Displays animation timelines and keys together for timing edits, copying, scaling, and retiming. |
+| Bone/Image Compensation | Yes | Yes | Yes | ❌ | Keeps selected child bones or images visually in place while their parent is transformed, making rig setup and correction easier. |
+| Posing | Yes | Yes | Yes | ❌ | Provides the Pose tool for quickly positioning a skeleton using temporary multi-bone IK-style manipulation. This is distinct from storing an IK constraint in the rig. |
 
 #### Matrix caveats
 

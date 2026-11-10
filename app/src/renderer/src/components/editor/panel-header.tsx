@@ -9,7 +9,12 @@ interface PanelHeaderProps {
   className?: string
 }
 
-export function PanelHeader({ title, eyebrow, actions, className }: PanelHeaderProps): React.JSX.Element {
+export function PanelHeader({
+  title,
+  eyebrow,
+  actions,
+  className
+}: PanelHeaderProps): React.JSX.Element {
   return (
     <div
       className={cn(
@@ -21,7 +26,9 @@ export function PanelHeader({ title, eyebrow, actions, className }: PanelHeaderP
         <span className="truncate text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground/90">
           {title}
         </span>
-        {eyebrow ? <span className="truncate text-[10px] text-muted-foreground">{eyebrow}</span> : null}
+        {eyebrow ? (
+          <span className="truncate text-[10px] text-muted-foreground">{eyebrow}</span>
+        ) : null}
       </div>
       {actions ? <div className="flex items-center gap-1">{actions}</div> : null}
     </div>

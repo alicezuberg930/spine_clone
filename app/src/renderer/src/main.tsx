@@ -7,7 +7,7 @@ import { TooltipProvider } from './components/ui/tooltip'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <TooltipProvider>
+    <TooltipProvider delay={400}>
       <App />
     </TooltipProvider>
   </StrictMode>

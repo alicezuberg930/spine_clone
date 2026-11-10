@@ -37,7 +37,8 @@ export function IconTool({
             onClick={onClick}
             className={cn(
               'size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground',
-              active && 'bg-primary/14 text-primary ring-1 ring-primary/35 hover:bg-primary/18 hover:text-primary',
+              active &&
+                'bg-primary/14 text-primary ring-1 ring-primary/35 hover:bg-primary/18 hover:text-primary',
               className
             )}
           />
@@ -47,7 +48,9 @@ export function IconTool({
       </TooltipTrigger>
       <TooltipContent className="flex items-center gap-2">
         <span>{label}</span>
-        {shortcut ? <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-[10px]">{shortcut}</kbd> : null}
+        {shortcut ? (
+          <kbd className="rounded bg-white/10 px-1.5 py-0.5 text-[10px]">{shortcut}</kbd>
+        ) : null}
       </TooltipContent>
     </Tooltip>
   )
