@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.hf-cache/
+**/.venv/
+venv/
+node_modules
+.idea
+server/storage/
+dist
+storage/**
