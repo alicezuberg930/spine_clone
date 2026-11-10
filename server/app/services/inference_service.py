@@ -11,8 +11,6 @@ from diffusers.quantizers import PipelineQuantizationConfig
 
 class InferenceService:
 
-    MODEL_ID = "Qwen/Qwen-Image-Layered"
-
     def __init__(self):
         self.pipeline = None
         self.inference_lock = threading.Lock()
@@ -63,7 +61,7 @@ class InferenceService:
         print("Offloading: Model CPU")
 
         self.pipeline = QwenImageLayeredPipeline.from_pretrained(
-            self.MODEL_ID,
+            "Qwen/Qwen-Image-Layered",
             torch_dtype=self.dtype,
             quantization_config=quantization_config,
             low_cpu_mem_usage=True,
@@ -111,9 +109,7 @@ class InferenceService:
 
         image = image.convert("RGBA")
 
-        generator = torch.Generator(
-            device="cuda"
-        ).manual_seed(seed)
+        generator = torch.Generator(device="cuda").manual_seed(seed)
 
         with self.inference_lock:
 
