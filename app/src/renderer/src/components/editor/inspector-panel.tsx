@@ -13,7 +13,6 @@ import {
   MoreHorizontal,
   RefreshCw,
   Scaling,
-  SlidersHorizontal,
   Sparkles,
   Spline,
   Target,
@@ -24,6 +23,7 @@ import {
 } from 'lucide-react'
 
 import { PanelHeader } from '@/components/editor/panel-header'
+import { BoneBindingCombobox } from '@/components/editor/bone-binding-combobox'
 import {
   Accordion,
   AccordionContent,
@@ -46,7 +46,6 @@ import type {
   Constraint,
   EditorTool,
   GeometrySelection,
-  PhysicsParams,
   Transform,
   WeightBrush
 } from '@/@types'
@@ -63,22 +62,21 @@ interface InspectorPanelProps {
   selectedId: string
   selectedName: string
   transform: Transform
-  physics: PhysicsParams
   flags: InspectorFlags
   frame: number
   artworkLayer: ArtworkLayer | null
   tool: EditorTool
   bones: BoneType[]
+  constraints: Constraint[]
   geometrySelection: GeometrySelection | null
   weightBrush: WeightBrush
   selectedConstraint: Constraint | null
   selectedAudioTrack: AudioTrack | null
   onTransformChange: (patch: Partial<Transform>) => void
-  onPhysicsChange: (patch: Partial<PhysicsParams>) => void
-  onPhysicsEnabledChange: (enabled: boolean) => void
   onToggle: (key: 'showMesh' | 'showWeights' | 'showClipping' | 'showBounds') => void
   onResetTransform: () => void
   onArtworkLayerVisibilityChange: (id: string) => void
+  onArtworkLayerBoneChange: (layerId: string, boneId: string | null) => void
   onCreateArtworkMesh: (layerId: string, cells: number) => void
   onResetArtworkDeformation: (layerId: string) => void
   onWeightBrushChange: (changes: Partial<WeightBrush>) => void
@@ -102,6 +100,7 @@ function ArtworkLayerInspector({
   geometrySelection,
   weightBrush,
   onVisibilityChange,
+  onBoneChange,
   onCreateMesh,
   onResetDeformation,
   onWeightBrushChange,
@@ -116,6 +115,7 @@ function ArtworkLayerInspector({
   geometrySelection: GeometrySelection | null
   weightBrush: WeightBrush
   onVisibilityChange: (id: string) => void
+  onBoneChange: (layerId: string, boneId: string | null) => void
   onCreateMesh: (layerId: string, cells: number) => void
   onResetDeformation: (layerId: string) => void
   onWeightBrushChange: (changes: Partial<WeightBrush>) => void
@@ -189,6 +189,26 @@ function ArtworkLayerInspector({
                 size="sm"
                 checked={layer.visible}
                 onCheckedChange={() => onVisibilityChange(layer.id)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-border/70 bg-background/25 p-3">
+            <div className="flex items-center gap-2">
+              <Bone className="size-3.5 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium">Rigid bone binding</p>
+                <p className="text-[9px] text-muted-foreground">
+                  Move this layer with a bone without mesh weights
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-[58px_1fr] items-center gap-2">
+              <Label className="text-[10px] font-normal text-muted-foreground">Bone</Label>
+              <BoneBindingCombobox
+                bones={bones}
+                value={layer.boneId ?? null}
+                onValueChange={(boneId) => onBoneChange(layer.id, boneId)}
               />
             </div>
           </div>
@@ -602,6 +622,56 @@ function ConstraintInspector({
             </div>
           ) : null}
 
+          {constraint.type === 'physics' ? (
+            <div className="space-y-1 rounded-lg border border-primary/25 bg-primary/5 p-3">
+              <PhysicsSlider
+                label="Inertia"
+                value={constraint.physics?.inertia ?? 0}
+                onChange={(inertia) =>
+                  onChange({ physics: { ...constraint.physics, inertia } as Constraint['physics'] })
+                }
+              />
+              <PhysicsSlider
+                label="Strength"
+                value={constraint.physics?.strength ?? 0}
+                onChange={(strength) =>
+                  onChange({
+                    physics: { ...constraint.physics, strength } as Constraint['physics']
+                  })
+                }
+              />
+              <PhysicsSlider
+                label="Damping"
+                value={constraint.physics?.damping ?? 0}
+                onChange={(damping) =>
+                  onChange({ physics: { ...constraint.physics, damping } as Constraint['physics'] })
+                }
+              />
+              <PhysicsSlider
+                label="Mass"
+                value={constraint.physics?.mass ?? 1}
+                max={5}
+                onChange={(mass) =>
+                  onChange({ physics: { ...constraint.physics, mass } as Constraint['physics'] })
+                }
+              />
+              <PhysicsSlider
+                label="Wind"
+                value={constraint.physics?.wind ?? 0}
+                onChange={(wind) =>
+                  onChange({ physics: { ...constraint.physics, wind } as Constraint['physics'] })
+                }
+              />
+              <PhysicsSlider
+                label="Gravity"
+                value={constraint.physics?.gravity ?? 0}
+                onChange={(gravity) =>
+                  onChange({ physics: { ...constraint.physics, gravity } as Constraint['physics'] })
+                }
+              />
+            </div>
+          ) : null}
+
           <div className="rounded-lg border border-border/70 bg-background/25 p-3 text-[10px] text-muted-foreground">
             Drives {constraint.boneIds.length} bone{constraint.boneIds.length === 1 ? '' : 's'}
             {constraint.targetId ? ` from ${constraint.targetId}` : ''}.
@@ -685,22 +755,21 @@ export function InspectorPanel({
   selectedId,
   selectedName,
   transform,
-  physics,
   flags,
   frame,
   artworkLayer,
   tool,
   bones,
+  constraints,
   geometrySelection,
   weightBrush,
   selectedConstraint,
   selectedAudioTrack,
   onTransformChange,
-  onPhysicsChange,
-  onPhysicsEnabledChange,
   onToggle,
   onResetTransform,
   onArtworkLayerVisibilityChange,
+  onArtworkLayerBoneChange,
   onCreateArtworkMesh,
   onResetArtworkDeformation,
   onWeightBrushChange,
@@ -724,6 +793,7 @@ export function InspectorPanel({
         geometrySelection={geometrySelection}
         weightBrush={weightBrush}
         onVisibilityChange={onArtworkLayerVisibilityChange}
+        onBoneChange={onArtworkLayerBoneChange}
         onCreateMesh={onCreateArtworkMesh}
         onResetDeformation={onResetArtworkDeformation}
         onWeightBrushChange={onWeightBrushChange}
@@ -735,7 +805,7 @@ export function InspectorPanel({
     )
   }
 
-  if (selectedConstraint && selectedConstraint.type !== 'physics') {
+  if (selectedConstraint) {
     return (
       <ConstraintInspector
         constraint={selectedConstraint}
@@ -751,6 +821,25 @@ export function InspectorPanel({
         onChange={(changes) => onAudioTrackChange(selectedAudioTrack.id, changes)}
         onRemove={() => onAudioTrackRemove(selectedAudioTrack.id)}
       />
+    )
+  }
+
+  if (!selectedId) {
+    return (
+      <section className="panel-sheen flex h-full min-h-0 flex-col">
+        <PanelHeader title="Inspector" eyebrow={`frame ${frame}`} />
+        <div className="grid min-h-0 flex-1 place-items-center px-6 text-center">
+          <div>
+            <div className="mx-auto grid size-11 place-items-center rounded-xl border border-border/70 bg-muted/30">
+              <Bone className="size-5 text-muted-foreground" />
+            </div>
+            <p className="mt-3 text-xs font-medium">Nothing selected</p>
+            <p className="mt-1 max-w-52 text-[10px] leading-4 text-muted-foreground">
+              Import artwork or create a bone, then select it to edit its properties.
+            </p>
+          </div>
+        </div>
+      </section>
     )
   }
 
@@ -851,6 +940,20 @@ export function InspectorPanel({
                       value={Math.round(transform.scaleY * 100)}
                       suffix="%"
                       onChange={(scaleY) => onTransformChange({ scaleY: scaleY / 100 })}
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <NumberField
+                      label="Shear X"
+                      value={transform.shearX ?? 0}
+                      suffix="°"
+                      onChange={(shearX) => onTransformChange({ shearX })}
+                    />
+                    <NumberField
+                      label="Shear Y"
+                      value={transform.shearY ?? 0}
+                      suffix="°"
+                      onChange={(shearY) => onTransformChange({ shearY })}
                     />
                   </div>
                   <NumberField
@@ -968,120 +1071,42 @@ export function InspectorPanel({
         <TabsContent value="constraints" className="min-h-0 overflow-hidden">
           <ScrollArea className="h-full">
             <div className="space-y-3 p-3">
-              <div className="rounded-lg border border-primary/25 bg-primary/5 p-3">
-                <div className="mb-3 flex items-center gap-2">
-                  <div className="grid size-7 place-items-center rounded-md bg-primary/12">
-                    <Waves className="size-3.5 text-primary" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold">Physics · scarf follow-through</p>
-                    <p className="text-[9px] text-muted-foreground">Dynamic bone movement</p>
-                  </div>
-                  <Switch
-                    size="sm"
-                    checked={flags.physicsEnabled}
-                    onCheckedChange={onPhysicsEnabledChange}
-                  />
-                </div>
-                <PhysicsSlider
-                  label="Inertia"
-                  value={physics.inertia}
-                  onChange={(inertia) => onPhysicsChange({ inertia })}
-                />
-                <PhysicsSlider
-                  label="Strength"
-                  value={physics.strength}
-                  onChange={(strength) => onPhysicsChange({ strength })}
-                />
-                <PhysicsSlider
-                  label="Damping"
-                  value={physics.damping}
-                  onChange={(damping) => onPhysicsChange({ damping })}
-                />
-                <PhysicsSlider
-                  label="Mass"
-                  value={physics.mass}
-                  max={5}
-                  onChange={(mass) => onPhysicsChange({ mass })}
-                />
-                <PhysicsSlider
-                  label="Wind"
-                  value={physics.wind}
-                  onChange={(wind) => onPhysicsChange({ wind })}
-                />
-                <PhysicsSlider
-                  label="Gravity"
-                  value={physics.gravity}
-                  onChange={(gravity) => onPhysicsChange({ gravity })}
-                />
-              </div>
-
-              {[
-                {
-                  id: 'constraint-hand-ik',
-                  icon: Target,
-                  title: 'IK · hand aim',
-                  meta: '2 bones · mix 100%',
-                  color: 'text-[#86a9ff]'
-                },
-                {
-                  id: 'constraint-foot-ik',
-                  icon: Target,
-                  title: 'IK · grounded foot',
-                  meta: '2 bones · mix 100%',
-                  color: 'text-[#86a9ff]'
-                },
-                {
-                  id: 'constraint-gaze',
-                  icon: GitBranch,
-                  title: 'Transform · gaze driver',
-                  meta: 'Rotation → rotation · 35%',
-                  color: 'text-[#f4b85a]'
-                },
-                {
-                  id: 'constraint-scarf-path',
-                  icon: Spline,
-                  title: 'Path · scarf flow',
-                  meta: 'Bezier · tangent · 70%',
-                  color: 'text-[#d987e6]'
-                }
-              ].map((constraint) => (
-                <button
-                  key={constraint.title}
-                  type="button"
-                  onClick={() => onConstraintSelect(constraint.id)}
-                  className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-background/25 p-2.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
-                >
-                  <constraint.icon className={`size-4 ${constraint.color}`} />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[11px] font-medium">
-                      {constraint.title}
+              {constraints.map((constraint) => {
+                const Icon =
+                  constraint.type === 'ik'
+                    ? Target
+                    : constraint.type === 'transform'
+                      ? GitBranch
+                      : constraint.type === 'physics'
+                        ? Waves
+                        : Spline
+                return (
+                  <button
+                    key={constraint.id}
+                    type="button"
+                    onClick={() => onConstraintSelect(constraint.id)}
+                    className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-background/25 p-2.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
+                  >
+                    <Icon className="size-4 text-primary" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-medium">
+                        {constraint.name}
+                      </span>
+                      <span className="block truncate text-[9px] text-muted-foreground">
+                        {constraint.type} · {constraint.boneIds.length} bone
+                        {constraint.boneIds.length === 1 ? '' : 's'} ·{' '}
+                        {Math.round(constraint.mix * 100)}%
+                      </span>
                     </span>
-                    <span className="block truncate text-[9px] text-muted-foreground">
-                      {constraint.meta}
-                    </span>
-                  </span>
-                  <ChevronRight className="size-3.5 text-muted-foreground" />
-                </button>
-              ))}
-
-              <div className="rounded-lg border border-border/70 bg-background/25 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <SlidersHorizontal className="size-4 text-[#ff8fcf]" />
-                  <p className="text-[11px] font-medium">Expression slider</p>
-                  <Badge variant="outline" className="ml-auto h-4 px-1 text-[8px]">
-                    4.3
-                  </Badge>
-                </div>
-                <p className="mb-3 text-[9px] leading-4 text-muted-foreground">
-                  Map head rotation to the look-around animation frame.
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                  </button>
+                )
+              })}
+              {constraints.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-border/70 px-3 py-8 text-center text-[10px] text-muted-foreground">
+                  This project has no constraints.
                 </p>
-                <Slider
-                  value={[38]}
-                  onValueChange={() => onFeatureNotImplemented('Expression slider')}
-                  className="[&_[data-slot=slider-range]]:bg-[#ff8fcf] [&_[data-slot=slider-thumb]]:size-3"
-                />
-              </div>
+              ) : null}
             </div>
           </ScrollArea>
         </TabsContent>

@@ -28,7 +28,7 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { Animation, AudioTrack, EditorKeyframe, TimelineView } from '@/@types'
+import type { Animation, AnimationTrack, AudioTrack, EditorKeyframe, TimelineView } from '@/@types'
 import { cn } from '@/lib/utils'
 
 interface TimelinePanelProps {
@@ -60,15 +60,6 @@ interface TimelinePanelProps {
   onAnimationChange: (animation: string) => void
   onInsertKey: () => void
 }
-
-const trackLabels = [
-  { id: 'bone-root', name: 'root · translate Y', color: '#89a7ff' },
-  { id: 'bone-torso', name: 'torso · rotation', color: '#45d6bd' },
-  { id: 'bone-head', name: 'head · rotation', color: '#f4b85a' },
-  { id: 'bone-arm-l', name: 'arm L · rotation', color: '#ff8f9c' },
-  { id: 'mesh-deform', name: 'mesh · deform', color: '#d987e6' },
-  { id: 'event-footstep', name: 'events · footsteps', color: '#ff786f' }
-]
 
 function PlaybackButton({
   label,
@@ -104,11 +95,13 @@ function PlaybackButton({
 function Dopesheet({
   frame,
   duration,
+  tracks,
   keyframes,
   onFrameChange
 }: {
   frame: number
   duration: number
+  tracks: AnimationTrack[]
   keyframes: EditorKeyframe[]
   onFrameChange: (frame: number) => void
 }): React.JSX.Element {
@@ -132,13 +125,10 @@ function Dopesheet({
         <div className="flex h-6 items-center gap-1.5 border-b border-border/70 px-2 text-[9px] uppercase tracking-[0.12em] text-muted-foreground">
           <ListTree className="size-3" /> Timeline
         </div>
-        {trackLabels.map((track, index) => (
+        {tracks.map((track) => (
           <div
             key={track.id}
-            className={cn(
-              'flex h-7 items-center gap-2 border-b border-border/35 px-2 text-[10px]',
-              index === 2 && 'bg-primary/5'
-            )}
+            className="flex h-7 items-center gap-2 border-b border-border/35 px-2 text-[10px]"
           >
             <span className="size-1.5 rounded-full" style={{ backgroundColor: track.color }} />
             <span className="min-w-0 flex-1 truncate text-foreground/75">{track.name}</span>
@@ -162,21 +152,10 @@ function Dopesheet({
           ))}
         </div>
         <div className="timeline-grid relative h-[168px] min-w-0">
-          {trackLabels.map((track, row) => (
+          {tracks.map((track) => (
             <div key={track.id} className="relative h-7 border-b border-border/35">
               {keyframes
-                .filter((keyframe) => {
-                  if (row === 0) return keyframe.targetId.includes('root')
-                  if (row === 1)
-                    return (
-                      keyframe.targetId.includes('torso') || keyframe.targetId.includes('chest')
-                    )
-                  if (row === 2) return keyframe.targetId.includes('head')
-                  if (row === 3) return keyframe.targetId.includes('arm')
-                  if (row === 4)
-                    return keyframe.targetId.includes('cape') || keyframe.property === 'deform'
-                  return false
-                })
+                .filter((keyframe) => keyframe.trackId === track.id)
                 .map((keyframe) => (
                   <button
                     key={keyframe.id}
@@ -191,22 +170,13 @@ function Dopesheet({
                     onClick={() => onFrameChange(keyframe.frame)}
                   />
                 ))}
-              {row === 5
-                ? [3, 9, 15, 21, 27]
-                    .filter((eventFrame) => eventFrame <= duration)
-                    .map((eventFrame) => (
-                      <button
-                        key={eventFrame}
-                        type="button"
-                        className="absolute top-1/2 size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#ff786f] bg-[#311a1b]"
-                        style={{ left: `${(eventFrame / duration) * 100}%` }}
-                        onMouseDown={(event) => event.stopPropagation()}
-                        onClick={() => onFrameChange(eventFrame)}
-                      />
-                    ))
-                : null}
             </div>
           ))}
+          {tracks.length === 0 ? (
+            <div className="grid h-full place-items-center px-6 text-center text-[10px] text-muted-foreground">
+              No animation tracks yet. Create a bone and insert a key to begin animating.
+            </div>
+          ) : null}
         </div>
         <div
           className="pointer-events-none absolute bottom-0 top-0 z-20 w-px bg-primary shadow-[0_0_8px_rgba(69,214,189,0.55)]"
@@ -222,12 +192,29 @@ function Dopesheet({
 function GraphEditor({
   frame,
   duration,
+  keyframes,
   onFrameChange
 }: {
   frame: number
   duration: number
+  keyframes: EditorKeyframe[]
   onFrameChange: (frame: number) => void
 }): React.JSX.Element {
+  const numericKeys = keyframes.filter(
+    (keyframe): keyframe is EditorKeyframe & { value: number } => typeof keyframe.value === 'number'
+  )
+  const values = numericKeys.map((keyframe) => keyframe.value)
+  const minimum = values.length > 0 ? Math.min(...values) : 0
+  const maximum = values.length > 0 ? Math.max(...values) : 1
+  const range = Math.max(1, maximum - minimum)
+  const points = numericKeys
+    .map((keyframe) => ({
+      keyframe,
+      x: (keyframe.frame / Math.max(1, duration)) * 900,
+      y: 180 - ((keyframe.value - minimum) / range) * 150
+    }))
+    .sort((left, right) => left.x - right.x)
+
   return (
     <div className="relative h-full overflow-hidden bg-[#0c151a]">
       <svg viewBox="0 0 900 210" preserveAspectRatio="none" className="h-full w-full">
@@ -241,31 +228,20 @@ function GraphEditor({
           </linearGradient>
         </defs>
         <rect width="900" height="210" fill="url(#graph-grid)" />
-        <path
-          d="M0 160 C90 160 95 45 190 45 S305 168 390 145 S470 52 550 70 S680 170 760 120 S845 35 900 52 L900 210 L0 210 Z"
-          fill="url(#curve-fill)"
-        />
-        <path
-          d="M0 160 C90 160 95 45 190 45 S305 168 390 145 S470 52 550 70 S680 170 760 120 S845 35 900 52"
-          fill="none"
-          stroke="#45d6bd"
-          strokeWidth="2.5"
-        />
-        <path
-          d="M190 45 L135 45 M190 45 L250 45 M550 70 L495 110 M550 70 L610 70"
-          stroke="#f4b85a"
-          strokeWidth="1"
-          opacity="0.75"
-        />
-        {[
-          [0, 160, 0],
-          [190, 45, Math.round(duration * 0.2)],
-          [390, 145, Math.round(duration * 0.42)],
-          [550, 70, Math.round(duration * 0.61)],
-          [760, 120, Math.round(duration * 0.84)],
-          [900, 52, duration]
-        ].map(([x, y, keyFrame]) => (
-          <g key={x} onClick={() => onFrameChange(keyFrame)} className="cursor-pointer">
+        {points.length > 1 ? (
+          <polyline
+            points={points.map((point) => `${point.x},${point.y}`).join(' ')}
+            fill="none"
+            stroke="#45d6bd"
+            strokeWidth="2.5"
+          />
+        ) : null}
+        {points.map(({ keyframe, x, y }) => (
+          <g
+            key={keyframe.id}
+            onClick={() => onFrameChange(keyframe.frame)}
+            className="cursor-pointer"
+          >
             <circle cx={x} cy={y} r="7" fill="#0c151a" stroke="#f4b85a" strokeWidth="2" />
             <circle cx={x} cy={y} r="2" fill="#f4b85a" />
           </g>
@@ -279,6 +255,11 @@ function GraphEditor({
           strokeWidth="1"
         />
       </svg>
+      {points.length === 0 ? (
+        <div className="pointer-events-none absolute inset-0 grid place-items-center px-6 text-center text-[10px] text-muted-foreground">
+          No numeric keys to display.
+        </div>
+      ) : null}
       <div className="pointer-events-none absolute left-3 top-2 flex gap-2 text-[9px] text-muted-foreground">
         <Badge
           variant="outline"
@@ -481,6 +462,24 @@ export function TimelinePanel({
   onAnimationChange,
   onInsertKey
 }: TimelinePanelProps): React.JSX.Element {
+  const activeAnimationDefinition = animations.find((animation) => animation.id === activeAnimation)
+  const tracks = useMemo(() => {
+    const known = new Map(
+      (activeAnimationDefinition?.tracks ?? []).map((track) => [track.id, track])
+    )
+    keyframes.forEach((keyframe) => {
+      if (known.has(keyframe.trackId)) return
+      known.set(keyframe.trackId, {
+        id: keyframe.trackId,
+        name: `${keyframe.targetId} · ${keyframe.property}`,
+        targetId: keyframe.targetId,
+        property: keyframe.property,
+        color: '#67e8d0'
+      })
+    })
+    return [...known.values()]
+  }, [activeAnimationDefinition?.tracks, keyframes])
+
   return (
     <section className="flex h-full min-h-0 flex-col bg-[#0d161c]">
       <div className="flex h-10 shrink-0 items-center gap-2 border-b border-border/80 bg-[#121d24] px-2">
@@ -592,12 +591,18 @@ export function TimelinePanel({
           <Dopesheet
             frame={frame}
             duration={duration}
+            tracks={tracks}
             keyframes={keyframes}
             onFrameChange={onFrameChange}
           />
         ) : null}
         {view === 'graph' ? (
-          <GraphEditor frame={frame} duration={duration} onFrameChange={onFrameChange} />
+          <GraphEditor
+            frame={frame}
+            duration={duration}
+            keyframes={keyframes}
+            onFrameChange={onFrameChange}
+          />
         ) : null}
         {view === 'audio' ? (
           <AudioTimeline

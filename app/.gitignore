@@ -4,4 +4,4 @@ out
 .DS_Store
 .eslintcache
 *.log*
-test-fixtures/audio/*.wav
+test-fixtures

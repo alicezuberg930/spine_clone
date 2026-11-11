@@ -10,6 +10,7 @@ import {
   Magnet,
   MousePointer2,
   Move,
+  MoveDiagonal2,
   PenTool,
   RotateCw,
   Scaling,
@@ -46,7 +47,9 @@ const primaryTools: Array<{
   { id: 'translate', label: 'Translate', shortcut: 'T', icon: Move, implemented: true },
   { id: 'rotate', label: 'Rotate', shortcut: 'R', icon: RotateCw, implemented: true },
   { id: 'scale', label: 'Scale', shortcut: 'E', icon: Scaling, implemented: true },
-  { id: 'pose', label: 'Pose / IK', shortcut: 'P', icon: Hand, implemented: true }
+  { id: 'shear', label: 'Shear', shortcut: 'H', icon: MoveDiagonal2, implemented: true },
+  { id: 'pose', label: 'Pose / IK', shortcut: 'P', icon: Hand, implemented: true },
+  { id: 'create-bone', label: 'Create bone', shortcut: 'N', icon: Bone, implemented: true }
 ]
 
 const geometryTools: Array<{

@@ -16,10 +16,10 @@ import {
   Layers3,
   PackageOpen,
   Redo2,
-  RotateCcw,
   Save,
   ScanLine,
   Sparkles,
+  Trash2,
   Undo2
 } from 'lucide-react'
 
@@ -39,6 +39,7 @@ import {
 
 interface EditorMenubarProps {
   onNewProject: () => void
+  onOpenProject: () => void
   onImportArtwork: () => void
   onImportAudio: () => void
   onSaveProject: () => void
@@ -47,7 +48,8 @@ interface EditorMenubarProps {
   onExportVideo: () => void
   onFeatureNotImplemented: (feature: string) => void
   onInsertKey: () => void
-  onResetDemo: () => void
+  onDeleteBone: () => void
+  canDeleteBone: boolean
   onToggle: (
     key: 'showGrid' | 'showBones' | 'showMesh' | 'showBounds' | 'ghosting' | 'audioEnabled'
   ) => void
@@ -59,6 +61,7 @@ interface EditorMenubarProps {
 
 export function EditorMenubar({
   onNewProject,
+  onOpenProject,
   onImportArtwork,
   onImportAudio,
   onSaveProject,
@@ -67,7 +70,8 @@ export function EditorMenubar({
   onExportVideo,
   onFeatureNotImplemented,
   onInsertKey,
-  onResetDemo,
+  onDeleteBone,
+  canDeleteBone,
   onToggle,
   flags
 }: EditorMenubarProps): React.JSX.Element {
@@ -80,7 +84,7 @@ export function EditorMenubar({
             <FilePlus2 /> New project
             <MenubarShortcut>Ctrl+N</MenubarShortcut>
           </MenubarItem>
-          <MenubarItem onClick={() => onFeatureNotImplemented('Open project')}>
+          <MenubarItem onClick={onOpenProject}>
             <FolderOpen /> Open project…
             <MenubarShortcut>Ctrl+O</MenubarShortcut>
           </MenubarItem>
@@ -142,8 +146,9 @@ export function EditorMenubar({
             <MenubarShortcut>Ctrl+Y</MenubarShortcut>
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem onClick={onResetDemo}>
-            <RotateCcw /> Reset demo pose
+          <MenubarItem variant="destructive" disabled={!canDeleteBone} onClick={onDeleteBone}>
+            <Trash2 /> Delete bone
+            <MenubarShortcut>Delete</MenubarShortcut>
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>

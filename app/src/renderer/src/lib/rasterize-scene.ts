@@ -33,10 +33,17 @@ function cloneSceneSvg(source: SVGSVGElement, width: number, height: number): SV
   clone.querySelectorAll('[data-editor-only], [data-export-exclude]').forEach((element) => {
     element.remove()
   })
-  clone.querySelectorAll('[data-selection-stroke]').forEach((element) => {
-    element.setAttribute('stroke', '#071013')
-    element.setAttribute('stroke-width', '5')
-    element.removeAttribute('data-selection-stroke')
+  clone.querySelectorAll('[data-export-remove-style]').forEach((element) => {
+    element.removeAttribute('style')
+    element.removeAttribute('data-export-remove-style')
+  })
+  clone.querySelectorAll('[data-export-stroke]').forEach((element) => {
+    const stroke = element.getAttribute('data-export-stroke')
+    const strokeWidth = element.getAttribute('data-export-stroke-width')
+    if (stroke !== null) element.setAttribute('stroke', stroke)
+    if (strokeWidth !== null) element.setAttribute('stroke-width', strokeWidth)
+    element.removeAttribute('data-export-stroke')
+    element.removeAttribute('data-export-stroke-width')
   })
   clone.querySelectorAll('[data-export-transform]').forEach((element) => {
     const transform = element.getAttribute('data-export-transform')

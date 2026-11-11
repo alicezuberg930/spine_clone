@@ -12,6 +12,7 @@ interface UseEditorShortcutsOptions {
   onNewProject: () => void
   onOpenProject: () => void
   onSave: () => void
+  onDeleteSelection: () => void
   onFeatureNotImplemented: (feature: string) => void
 }
 
@@ -20,7 +21,9 @@ const toolShortcuts: Record<string, EditorTool> = {
   t: 'translate',
   r: 'rotate',
   e: 'scale',
+  h: 'shear',
   p: 'pose',
+  n: 'create-bone',
   m: 'mesh',
   d: 'deform',
   w: 'weights',
@@ -41,10 +44,12 @@ export function useEditorShortcuts({
   onNewProject,
   onOpenProject,
   onSave,
+  onDeleteSelection,
   onFeatureNotImplemented
 }: UseEditorShortcutsOptions): void {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return
       const target = event.target as HTMLElement | null
       if (target?.matches('input, textarea, select, [contenteditable="true"]')) return
 
@@ -69,7 +74,10 @@ export function useEditorShortcuts({
         return
       }
 
-      if (event.code === 'Space') {
+      if (key === 'delete' || key === 'backspace') {
+        event.preventDefault()
+        onDeleteSelection()
+      } else if (event.code === 'Space') {
         event.preventDefault()
         onTogglePlayback()
       } else if (event.code === 'F9') {
@@ -98,6 +106,7 @@ export function useEditorShortcuts({
     onNewProject,
     onOpenProject,
     onSave,
+    onDeleteSelection,
     onToggleGhosting,
     onToggleBones,
     onTogglePlayback,

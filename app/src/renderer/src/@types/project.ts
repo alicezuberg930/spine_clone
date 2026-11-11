@@ -13,6 +13,8 @@ export interface EditorProject {
   name: string
   skeletonName: string
   canvas: ProjectCanvas
+  /** Coordinate space used by bone transforms. Legacy rigs are aligned once on artwork import. */
+  boneSpace: 'legacy' | 'canvas'
   bones: Bone[]
   slots: Slot[]
   attachments: Attachment[]

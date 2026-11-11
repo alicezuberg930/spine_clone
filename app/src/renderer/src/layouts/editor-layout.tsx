@@ -3,7 +3,9 @@ import { CheckCircle2, X } from 'lucide-react'
 
 import { FeatureNotImplementedDialog } from '@/components/editor/dialogs/feature-not-implemented-dialog'
 import { AudioImportDialog } from '@/components/editor/dialogs/audio-import-dialog'
+import { DeleteBoneDialog } from '@/components/editor/dialogs/delete-bone-dialog'
 import { LayeredArtworkDialog } from '@/components/editor/dialogs/layered-artwork-dialog'
+import { RenameBoneDialog } from '@/components/editor/dialogs/rename-bone-dialog'
 import {
   NewProjectDialog,
   type NewProjectValues
@@ -25,10 +27,12 @@ import {
 } from '@/hooks/use-editor-state'
 import { useAudioPlayback } from '@/hooks/use-audio-playback'
 import { usePlayback } from '@/hooks/use-playback'
-import type { AudioTrack, EditorSelection, ViewFlag } from '@/@types'
+import type { AudioTrack, BoneDeletionMode, EditorSelection, Transform, ViewFlag } from '@/@types'
+import { evaluateBoneTransforms } from '@/lib/bone-animation'
+import { boneNameValidationError, normalizeBoneName } from '@/lib/bone-naming'
 import { importArtworkFiles } from '@/lib/import-artwork'
 import { createDefaultClipping, createGridMesh, weightedMeshDeformation } from '@/lib/mesh-geometry'
-import { serializeProject } from '@/lib/project-serialization'
+import { deserializeProject, serializeProject } from '@/lib/project-serialization'
 import { rasterizeSceneToPng, drawSceneToCanvas } from '@/lib/rasterize-scene'
 import { recordSceneVideo } from '@/lib/record-scene-video'
 import { serializeRuntimeData } from '@/lib/runtime-data-export'
@@ -54,13 +58,54 @@ export function EditorLayout(): React.JSX.Element {
   const [artworkImportOpen, setArtworkImportOpen] = useState(false)
   const [audioImportOpen, setAudioImportOpen] = useState(false)
   const [audioEnabled, setAudioEnabled] = useState(true)
+  const [pendingDeleteBoneId, setPendingDeleteBoneId] = useState<string | null>(null)
+  const [pendingRenameBoneId, setPendingRenameBoneId] = useState<string | null>(null)
+  const [renameBoneError, setRenameBoneError] = useState<string | null>(null)
   const [outputBusy, setOutputBusy] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const viewportSvgRef = useRef<SVGSVGElement | null>(null)
 
-  const selectedId = state.selection?.id ?? 'bone-head'
+  const selectedId = state.selection?.id ?? ''
+  const selectedBone =
+    state.selection?.kind === 'bone'
+      ? (state.project.bones.find((bone) => bone.id === state.selection?.id) ?? null)
+      : null
+  const pendingDeleteBone = pendingDeleteBoneId
+    ? (state.project.bones.find((bone) => bone.id === pendingDeleteBoneId) ?? null)
+    : null
+  const pendingRenameBone = pendingRenameBoneId
+    ? (state.project.bones.find((bone) => bone.id === pendingRenameBoneId) ?? null)
+    : null
+  const pendingDeleteChildCount = pendingDeleteBone
+    ? state.project.bones.filter((bone) => bone.parentId === pendingDeleteBone.id).length
+    : 0
+  const pendingDeleteDescendantCount = useMemo(() => {
+    if (!pendingDeleteBone) return 0
+    const childrenByParent = new Map<string, string[]>()
+    state.project.bones.forEach((bone) => {
+      if (!bone.parentId) return
+      const children = childrenByParent.get(bone.parentId) ?? []
+      children.push(bone.id)
+      childrenByParent.set(bone.parentId, children)
+    })
+    let count = 0
+    const pending = [...(childrenByParent.get(pendingDeleteBone.id) ?? [])]
+    const visited = new Set<string>()
+    while (pending.length > 0) {
+      const id = pending.pop()
+      if (!id || visited.has(id)) continue
+      visited.add(id)
+      count += 1
+      pending.push(...(childrenByParent.get(id) ?? []))
+    }
+    return count
+  }, [pendingDeleteBone, state.project.bones])
   const selectedName =
-    selectedEntity && 'name' in selectedEntity ? selectedEntity.name : state.project.skeletonName
+    selectedEntity && 'name' in selectedEntity
+      ? selectedEntity.name
+      : state.selection
+        ? state.project.skeletonName
+        : 'No selection'
   const selectedArtworkLayer =
     state.selection?.kind === 'artwork-layer'
       ? (state.project.artwork?.layers.find((layer) => layer.id === state.selection?.id) ?? null)
@@ -75,6 +120,19 @@ export function EditorLayout(): React.JSX.Element {
       ? (state.project.audioTracks.find((track) => track.id === state.selection?.id) ?? null)
       : null
   const audioTrack = selectedAudioTrack ?? state.project.audioTracks[0] ?? null
+  const selectedIds = state.selections.map((selection) => selection.id)
+  const displayedBones = useMemo(
+    () =>
+      state.mode === 'animate'
+        ? evaluateBoneTransforms(state.project.bones, state.keyframes, state.frame)
+        : state.project.bones,
+    [state.frame, state.keyframes, state.mode, state.project.bones]
+  )
+  const displayedSelectedBone =
+    state.selection?.kind === 'bone'
+      ? (displayedBones.find((bone) => bone.id === state.selection?.id) ?? null)
+      : null
+  const displayedTransform = displayedSelectedBone?.transform ?? state.transform
   const keyedDeformations = useMemo(
     () =>
       Object.fromEntries(
@@ -90,9 +148,15 @@ export function EditorLayout(): React.JSX.Element {
       Object.fromEntries(
         (state.project.artwork?.layers ?? []).map((layer) => {
           const keyed = keyedDeformations[layer.id] ?? {}
-          const weighted = layer.mesh
-            ? weightedMeshDeformation(layer.mesh, state.project.bones)
-            : {}
+          // A layer uses either rigid bone binding or weighted skinning. Applying both
+          // would multiply the same bone delta twice.
+          const weighted =
+            layer.mesh && !layer.boneId
+              ? weightedMeshDeformation(layer.mesh, displayedBones, {
+                  x: layer.x,
+                  y: layer.y
+                })
+              : {}
           const vertexIds = new Set([...Object.keys(keyed), ...Object.keys(weighted)])
           return [
             layer.id,
@@ -108,12 +172,82 @@ export function EditorLayout(): React.JSX.Element {
           ]
         })
       ),
-    [keyedDeformations, state.project.artwork, state.project.bones]
+    [displayedBones, keyedDeformations, state.project.artwork]
   )
 
   const showFeatureNotImplemented = useCallback((feature: string): void => {
     setUnimplementedFeature(feature)
   }, [])
+
+  const requestBoneDelete = useCallback(
+    (boneId?: string): void => {
+      const id = boneId ?? (state.selection?.kind === 'bone' ? state.selection.id : null)
+      if (!id) return
+      const bone = state.project.bones.find((candidate) => candidate.id === id)
+      if (!bone) return
+      if (bone.parentId === null) {
+        setNotice('The root bone cannot be deleted.')
+        return
+      }
+      if (state.selection?.kind !== 'bone' || state.selection.id !== id) {
+        actions.select({ kind: 'bone', id })
+      }
+      setPendingDeleteBoneId(id)
+    },
+    [actions, state.project.bones, state.selection]
+  )
+
+  const confirmBoneDelete = useCallback(
+    (mode: BoneDeletionMode): void => {
+      if (!pendingDeleteBone || pendingDeleteBone.parentId === null) {
+        setPendingDeleteBoneId(null)
+        return
+      }
+      actions.deleteBone(pendingDeleteBone.id, mode)
+      setPendingDeleteBoneId(null)
+      setNotice(
+        mode === 'branch' && pendingDeleteDescendantCount > 0
+          ? `Deleted ${pendingDeleteBone.name} and its child branch`
+          : mode === 'reparent' && pendingDeleteChildCount > 0
+            ? `Deleted ${pendingDeleteBone.name} and reparented its children`
+            : `Deleted ${pendingDeleteBone.name}`
+      )
+    },
+    [actions, pendingDeleteBone, pendingDeleteChildCount, pendingDeleteDescendantCount]
+  )
+
+  const requestBoneRename = useCallback(
+    (boneId: string): void => {
+      const bone = state.project.bones.find((candidate) => candidate.id === boneId)
+      if (!bone) return
+      if (state.selection?.kind !== 'bone' || state.selection.id !== boneId) {
+        actions.select({ kind: 'bone', id: boneId })
+      }
+      setRenameBoneError(null)
+      setPendingRenameBoneId(boneId)
+    },
+    [actions, state.project.bones, state.selection]
+  )
+
+  const confirmBoneRename = useCallback(
+    (value: string): void => {
+      if (!pendingRenameBone) return
+      const error = boneNameValidationError(state.project.bones, pendingRenameBone.id, value)
+      if (error) {
+        setRenameBoneError(error)
+        return
+      }
+
+      const name = normalizeBoneName(value)
+      if (name !== pendingRenameBone.name) {
+        actions.renameBone(pendingRenameBone.id, name)
+        setNotice(`Renamed ${pendingRenameBone.name} to ${name}`)
+      }
+      setRenameBoneError(null)
+      setPendingRenameBoneId(null)
+    },
+    [actions, pendingRenameBone, state.project.bones]
+  )
 
   const insertKey = useCallback((): void => {
     if (state.tool === 'deform' && selectedArtworkLayer) {
@@ -131,15 +265,31 @@ export function EditorLayout(): React.JSX.Element {
       setNotice(`Deformation key added at frame ${state.frame}`)
       return
     }
-    actions.upsertKeyframe(
-      `track-${selectedId}-rotation`,
-      selectedId,
-      'rotation',
-      state.frame,
-      state.transform.rotation,
-      'bezier'
+    if (!selectedBone) {
+      setNotice('Select a bone before adding a key')
+      return
+    }
+    const properties: Array<keyof Transform> =
+      state.tool === 'translate'
+        ? ['x', 'y']
+        : state.tool === 'scale'
+          ? ['scaleX', 'scaleY']
+          : state.tool === 'shear'
+            ? ['shearX', 'shearY']
+            : ['rotation']
+    properties.forEach((property) => {
+      actions.upsertKeyframe(
+        `track-${selectedId}-${property}`,
+        selectedId,
+        property,
+        state.frame,
+        displayedTransform[property] ?? 0,
+        'bezier'
+      )
+    })
+    setNotice(
+      `${state.tool === 'select' ? 'Transform' : state.tool} key added at frame ${state.frame}`
     )
-    setNotice(`Key added at frame ${state.frame}`)
   }, [
     actions,
     selectedArtworkLayer,
@@ -147,7 +297,8 @@ export function EditorLayout(): React.JSX.Element {
     state.frame,
     state.keyframes,
     state.tool,
-    state.transform.rotation
+    displayedTransform,
+    selectedBone
   ])
 
   const outputName = useCallback(
@@ -178,6 +329,36 @@ export function EditorLayout(): React.JSX.Element {
       setOutputBusy(null)
     }
   }, [outputBusy, outputName, state])
+
+  const handleOpenProject = useCallback(async (): Promise<void> => {
+    if (outputBusy) return
+    setOutputBusy('Opening project')
+    try {
+      const result = await window.api.openProject()
+      if (result.status === 'cancelled') return
+      if (result.status === 'error') {
+        setNotice(result.message)
+        return
+      }
+
+      const loadedState = deserializeProject(result.contents)
+      const acceptance = await window.api.acceptOpenProject(loadedState.project.id)
+      if (acceptance.status === 'error') {
+        setNotice(acceptance.message)
+        return
+      }
+      actions.loadProject(loadedState)
+      setAudioEnabled(true)
+      setPendingDeleteBoneId(null)
+      setPendingRenameBoneId(null)
+      setRenameBoneError(null)
+      setNotice(`Opened ${loadedState.project.name} from ${result.filePath}`)
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'The project could not be opened.')
+    } finally {
+      setOutputBusy(null)
+    }
+  }, [actions, outputBusy])
 
   const handleExportData = useCallback(async (): Promise<void> => {
     if (outputBusy) return
@@ -320,8 +501,9 @@ export function EditorLayout(): React.JSX.Element {
     onToggleSnap: () => actions.toggleViewFlag('snap'),
     onInsertKey: insertKey,
     onNewProject: () => setNewProjectOpen(true),
-    onOpenProject: () => showFeatureNotImplemented('Open project'),
+    onOpenProject: () => void handleOpenProject(),
     onSave: () => void handleSaveProject(),
+    onDeleteSelection: () => requestBoneDelete(),
     onFeatureNotImplemented: showFeatureNotImplemented
   })
 
@@ -344,6 +526,9 @@ export function EditorLayout(): React.JSX.Element {
 
   function handleCreateProject(values: NewProjectValues): void {
     actions.configureProject(values.name, values.width, values.height, values.fps)
+    setPendingDeleteBoneId(null)
+    setPendingRenameBoneId(null)
+    setRenameBoneError(null)
     setNotice(`${values.name} created · ${values.width} × ${values.height}`)
   }
 
@@ -372,6 +557,7 @@ export function EditorLayout(): React.JSX.Element {
         mode={state.mode}
         onModeChange={actions.setMode}
         onNewProject={() => setNewProjectOpen(true)}
+        onOpenProject={() => void handleOpenProject()}
         onImportArtwork={() => setArtworkImportOpen(true)}
         onImportAudio={() => setAudioImportOpen(true)}
         onSaveProject={() => void handleSaveProject()}
@@ -380,10 +566,8 @@ export function EditorLayout(): React.JSX.Element {
         onExportVideo={() => void handleExportVideo()}
         onFeatureNotImplemented={showFeatureNotImplemented}
         onInsertKey={insertKey}
-        onResetDemo={() => {
-          actions.resetDemo()
-          setNotice('Demo workspace restored')
-        }}
+        onDeleteBone={() => requestBoneDelete()}
+        canDeleteBone={Boolean(selectedBone && selectedBone.parentId !== null)}
         onToggle={toggleView}
         flags={{
           showGrid: state.showGrid,
@@ -412,12 +596,18 @@ export function EditorLayout(): React.JSX.Element {
         <ResizablePanelGroup orientation="horizontal" className="min-h-0 min-w-0 flex-1">
           <ResizablePanel defaultSize="20%" minSize="210px" maxSize="350px">
             <HierarchyPanel
-              selectedId={selectedId}
+              projectName={state.project.name}
+              selectedIds={selectedIds}
               onSelect={(id) => actions.select(selectionFromId(id))}
+              onDeleteBone={requestBoneDelete}
+              onRenameBone={requestBoneRename}
               artwork={state.project.artwork}
               audioTracks={state.project.audioTracks}
               bones={state.project.bones}
+              slots={state.project.slots}
+              attachments={state.project.attachments}
               constraints={state.project.constraints}
+              skins={state.project.skins}
               onArtworkLayerSelect={(id) => actions.select({ kind: 'artwork-layer', id })}
               onArtworkLayerVisibilityChange={actions.toggleArtworkLayer}
               onImportArtwork={() => setArtworkImportOpen(true)}
@@ -440,21 +630,23 @@ export function EditorLayout(): React.JSX.Element {
                   tool={state.tool}
                   frame={state.frame}
                   duration={state.duration}
-                  zoom={Math.round(state.zoom * 100)}
+                  zoom={state.zoom * 100}
                   transform={{
-                    ...state.transform,
-                    scaleX: state.transform.scaleX * 100,
-                    scaleY: state.transform.scaleY * 100,
-                    opacity: state.transform.opacity * 100
+                    ...displayedTransform,
+                    scaleX: displayedTransform.scaleX * 100,
+                    scaleY: displayedTransform.scaleY * 100,
+                    opacity: displayedTransform.opacity * 100
                   }}
-                  activeSkin={state.activeSkin}
+                  projectName={state.project.name}
+                  canvas={state.project.canvas}
                   artwork={state.project.artwork}
-                  constraints={state.project.constraints}
+                  bones={displayedBones}
                   geometrySelection={state.geometrySelection}
                   weightBrush={state.weightBrush}
                   deformations={deformations}
                   keyedDeformations={keyedDeformations}
                   selectedId={selectedId}
+                  selectedIds={selectedIds}
                   isPlaying={state.isPlaying}
                   flags={{
                     showGrid: state.showGrid,
@@ -469,7 +661,6 @@ export function EditorLayout(): React.JSX.Element {
                   }}
                   onZoomChange={(zoom) => actions.setZoom(zoom / 100)}
                   onTransformChange={(patch) => actions.updateTransform(patch)}
-                  onConstraintChange={actions.updateConstraint}
                   onGeometrySelectionChange={actions.setGeometrySelection}
                   onMeshVerticesChange={actions.moveArtworkMeshVertices}
                   onDeformationChange={actions.setArtworkDeformation}
@@ -477,10 +668,12 @@ export function EditorLayout(): React.JSX.Element {
                   onWeightPaint={actions.paintArtworkWeights}
                   onAddClipVertex={actions.addClipVertex}
                   onRemoveGeometryVertices={actions.removeGeometryVertices}
+                  onCreateBone={actions.createBone}
                   onSvgElement={(element) => {
                     viewportSvgRef.current = element
                   }}
                   onSelect={(id) => actions.select(selectionFromId(id))}
+                  onSelectMany={(ids) => actions.selectMany(ids.map(selectionFromId))}
                   onToggle={toggleView}
                   onFeatureNotImplemented={showFeatureNotImplemented}
                 />
@@ -528,8 +721,7 @@ export function EditorLayout(): React.JSX.Element {
             <InspectorPanel
               selectedId={selectedId}
               selectedName={selectedName}
-              transform={state.transform}
-              physics={state.physics}
+              transform={displayedTransform}
               flags={{
                 showMesh: state.showMesh,
                 showWeights: state.showWeights,
@@ -541,16 +733,16 @@ export function EditorLayout(): React.JSX.Element {
               artworkLayer={selectedArtworkLayer}
               tool={state.tool}
               bones={state.project.bones}
+              constraints={state.project.constraints}
               geometrySelection={state.geometrySelection}
               weightBrush={state.weightBrush}
               selectedConstraint={selectedConstraint}
               selectedAudioTrack={selectedAudioTrack}
               onTransformChange={actions.updateTransform}
-              onPhysicsChange={actions.updatePhysics}
-              onPhysicsEnabledChange={actions.setPhysicsEnabled}
               onToggle={toggleView}
               onResetTransform={actions.resetTransform}
               onArtworkLayerVisibilityChange={actions.toggleArtworkLayer}
+              onArtworkLayerBoneChange={actions.bindArtworkLayer}
               onCreateArtworkMesh={(layerId, cells) => {
                 const layer = state.project.artwork?.layers.find((item) => item.id === layerId)
                 if (layer) {
@@ -599,6 +791,31 @@ export function EditorLayout(): React.JSX.Element {
         }}
         feature={unimplementedFeature ?? undefined}
       />
+      {pendingDeleteBone ? (
+        <DeleteBoneDialog
+          open
+          boneName={pendingDeleteBone.name}
+          childCount={pendingDeleteChildCount}
+          descendantCount={pendingDeleteDescendantCount}
+          onOpenChange={(open) => {
+            if (!open) setPendingDeleteBoneId(null)
+          }}
+          onDelete={confirmBoneDelete}
+        />
+      ) : null}
+      {pendingRenameBone ? (
+        <RenameBoneDialog
+          open
+          boneName={pendingRenameBone.name}
+          error={renameBoneError}
+          onOpenChange={(open) => {
+            if (open) return
+            setPendingRenameBoneId(null)
+            setRenameBoneError(null)
+          }}
+          onRename={confirmBoneRename}
+        />
+      ) : null}
       <NewProjectDialog
         open={newProjectOpen}
         onOpenChange={setNewProjectOpen}

@@ -9,6 +9,9 @@ import {
 
 // Custom APIs for renderer
 const api: DesktopOutputApi = {
+  openProject: () => ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.openProject),
+  acceptOpenProject: (projectId: string) =>
+    ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.acceptOpenProject, projectId),
   saveProject: (request: SaveProjectRequest) =>
     ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.saveProject, request),
   saveFile: (request: SaveFileRequest) => ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.saveFile, request)

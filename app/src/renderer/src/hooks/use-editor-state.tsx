@@ -7,7 +7,7 @@ import {
   useMemo,
   useReducer
 } from 'react'
-import { createDemoProject, DEFAULT_PHYSICS, DEFAULT_TRANSFORM } from '../lib/demo-project'
+import { createEmptyProject, DEFAULT_PHYSICS, DEFAULT_TRANSFORM } from '@/lib/editor-defaults'
 import type {
   Animation,
   Attachment,
@@ -17,6 +17,7 @@ import type {
   ArtworkMesh,
   AudioTrack,
   Bone,
+  BoneDeletionMode,
   Constraint,
   EditorKeyframe,
   EditorMode,
@@ -40,10 +41,17 @@ import {
   createDefaultClipping,
   createGridMesh,
   interpolateDeformation,
-  matrixFromTransform,
   normalizeVertexWeights,
   paintMeshWeights
 } from '@/lib/mesh-geometry'
+import {
+  artworkContentBounds,
+  createBoneFromWorldSegment,
+  fitBonesToBounds,
+  resolveBoneWorldMatrices
+} from '@/lib/skeleton-geometry'
+import { deleteBoneFromEditorState } from '@/lib/bone-deletion'
+import { boneNameValidationError, normalizeBoneName } from '@/lib/bone-naming'
 
 function updateArtworkLayer(
   project: EditorProject,
@@ -102,22 +110,23 @@ export function evaluateLayerDeformation(
 const getAnimation = (state: EditorState, id = state.activeAnimation): Animation | undefined =>
   state.project.animations.find((animation) => animation.id === id)
 
-const createInitialEditorState = (): EditorState => {
-  const project = createDemoProject()
+export const createInitialEditorState = (): EditorState => {
+  const project = createEmptyProject()
   const animation = project.animations[0]
 
   return {
     project,
-    mode: 'animate',
+    mode: 'setup',
     tool: 'select',
-    selection: { kind: 'bone', id: 'bone-head' },
-    frame: 12,
+    selection: null,
+    selections: [],
+    frame: 0,
     fps: animation.fps,
     duration: animation.duration,
     isPlaying: false,
     loop: animation.loop,
-    autoKey: true,
-    ghosting: true,
+    autoKey: false,
+    ghosting: false,
     showBones: true,
     showMesh: false,
     showWeights: false,
@@ -131,17 +140,19 @@ const createInitialEditorState = (): EditorState => {
     activeSkin: project.skins[0].id,
     activeAnimation: animation.id,
     geometrySelection: null,
-    weightBrush: { boneId: 'bone-root', radius: 90, strength: 0.35, mode: 'add' },
-    transform: { ...DEFAULT_TRANSFORM, rotation: -2 },
+    weightBrush: { boneId: null, radius: 90, strength: 0.35, mode: 'add' },
+    transform: { ...DEFAULT_TRANSFORM },
     physics: { ...DEFAULT_PHYSICS },
     keyframes: structuredClone(animation.keyframes)
   }
 }
 
 type EditorAction =
+  | { type: 'load-project'; state: EditorState }
   | { type: 'set-mode'; mode: EditorMode }
   | { type: 'set-tool'; tool: EditorTool }
   | { type: 'set-selection'; selection: EditorSelection | null }
+  | { type: 'set-selections'; selections: EditorSelection[] }
   | { type: 'set-frame'; frame: number }
   | { type: 'set-fps'; fps: number }
   | { type: 'set-duration'; duration: number }
@@ -157,7 +168,11 @@ type EditorAction =
   | { type: 'set-active-animation'; id: string }
   | { type: 'configure-project'; name: string; width: number; height: number; fps: number }
   | { type: 'set-artwork'; artwork: ArtworkDocument }
+  | { type: 'create-bone'; parentId: string | null; start: Point; end: Point }
+  | { type: 'rename-bone'; id: string; name: string }
+  | { type: 'delete-bone'; id: string; mode: BoneDeletionMode }
   | { type: 'toggle-artwork-layer'; id: string }
+  | { type: 'bind-artwork-layer'; layerId: string; boneId: string | null }
   | { type: 'clear-artwork' }
   | { type: 'set-geometry-selection'; selection: GeometrySelection | null }
   | { type: 'set-weight-brush'; changes: Partial<WeightBrush> }
@@ -197,13 +212,26 @@ type EditorAction =
     }
   | { type: 'move-keyframe'; id: string; frame: number }
   | { type: 'remove-keyframe'; id: string }
-  | { type: 'reset-demo' }
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
   Math.min(maximum, Math.max(minimum, value))
 
 const keyframeId = (targetId: string, property: string, frame: number): string =>
   `key-${targetId}-${property}-${frame}`
+
+const createdBoneColors = ['#67e8d0', '#89a7ff', '#f6c56f', '#ff8f9c', '#a58dff']
+
+function nextBoneIdentity(bones: readonly Bone[]): { id: string; name: string; color: string } {
+  let number = bones.length + 1
+  while (bones.some((bone) => bone.id === `bone-${number}` || bone.name === `bone ${number}`)) {
+    number += 1
+  }
+  return {
+    id: `bone-${number}`,
+    name: `bone ${number}`,
+    color: createdBoneColors[(number - 1) % createdBoneColors.length]
+  }
+}
 
 const upsertTransformKeys = (state: EditorState, changes: Partial<Transform>): EditorKeyframe[] => {
   if (state.mode !== 'animate' || !state.autoKey || !state.selection) return state.keyframes
@@ -238,14 +266,41 @@ const upsertTransformKeys = (state: EditorState, changes: Partial<Transform>): E
   return keyframes.sort((a, b) => a.frame - b.frame)
 }
 
+const withSelections = (
+  state: EditorState,
+  requestedSelections: EditorSelection[]
+): EditorState => {
+  const selections = [...requestedSelections]
+  const selection = selections[selections.length - 1] ?? null
+  const bone = state.project.bones.find((item) => item.id === selection?.id)
+
+  return {
+    ...state,
+    selection,
+    selections,
+    geometrySelection:
+      selection?.kind === 'artwork-layer' && state.geometrySelection?.layerId === selection.id
+        ? state.geometrySelection
+        : null,
+    transform: bone ? { ...bone.transform } : state.transform
+  }
+}
+
 const editorReducer = (state: EditorState, action: EditorAction): EditorState => {
   switch (action.type) {
+    case 'load-project':
+      return {
+        ...action.state,
+        isPlaying: false,
+        geometrySelection: null
+      }
     case 'set-mode':
       return {
         ...state,
         mode: action.mode,
         tool:
-          action.mode === 'setup' && ['pose', 'deform'].includes(state.tool)
+          (action.mode === 'setup' && ['pose', 'deform'].includes(state.tool)) ||
+          (action.mode === 'animate' && state.tool === 'create-bone')
             ? 'select'
             : state.tool,
         isPlaying: action.mode === 'setup' ? false : state.isPlaying
@@ -266,31 +321,37 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         )
       }
       const isGeometryTool = ['mesh', 'deform', 'weights', 'clipping'].includes(action.tool)
-      return {
+      const isBoneCreateTool = action.tool === 'create-bone'
+      const isBoneTransformTool = ['translate', 'rotate', 'scale', 'shear'].includes(action.tool)
+      const nextState: EditorState = {
         ...state,
         project,
-        mode: action.tool === 'deform' ? 'animate' : isGeometryTool ? 'setup' : state.mode,
-        isPlaying: isGeometryTool ? false : state.isPlaying,
+        mode:
+          action.tool === 'deform'
+            ? 'animate'
+            : isGeometryTool || isBoneCreateTool
+              ? 'setup'
+              : state.mode,
+        isPlaying: isGeometryTool || isBoneCreateTool ? false : state.isPlaying,
         tool: action.tool,
         geometrySelection: isGeometryTool ? state.geometrySelection : null,
+        showBones: isBoneCreateTool || isBoneTransformTool || state.showBones,
         showMesh: ['mesh', 'deform', 'weights'].includes(action.tool) || state.showMesh,
         showWeights: action.tool === 'weights' || state.showWeights,
         showClipping: action.tool === 'clipping' || state.showClipping
       }
+      if (!isBoneCreateTool) return nextState
+
+      const selectedBone = state.project.bones.find((bone) => bone.id === state.selection?.id)
+      const parent = selectedBone ?? state.project.bones.find((bone) => bone.parentId === null)
+      return parent
+        ? withSelections(nextState, [{ kind: 'bone', id: parent.id }])
+        : withSelections(nextState, [])
     }
-    case 'set-selection': {
-      const bone = state.project.bones.find((item) => item.id === action.selection?.id)
-      return {
-        ...state,
-        selection: action.selection,
-        geometrySelection:
-          action.selection?.kind === 'artwork-layer' &&
-          state.geometrySelection?.layerId === action.selection.id
-            ? state.geometrySelection
-            : null,
-        transform: bone ? { ...bone.transform } : state.transform
-      }
-    }
+    case 'set-selection':
+      return withSelections(state, action.selection ? [action.selection] : [])
+    case 'set-selections':
+      return withSelections(state, action.selections)
     case 'set-frame':
       return { ...state, frame: clamp(Math.round(action.frame), 0, state.duration) }
     case 'set-fps':
@@ -360,6 +421,20 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
     case 'set-artwork': {
       const selectedLayer =
         action.artwork.layers.find((layer) => layer.visible) ?? action.artwork.layers[0]
+      const selection: EditorSelection | null = selectedLayer
+        ? { kind: 'artwork-layer', id: selectedLayer.id }
+        : null
+
+      const artworkBounds = artworkContentBounds(action.artwork.layers, {
+        x: 0,
+        y: 0,
+        width: action.artwork.width,
+        height: action.artwork.height
+      })
+      const bones =
+        state.project.boneSpace === 'canvas'
+          ? state.project.bones
+          : fitBonesToBounds(state.project.bones, artworkBounds)
 
       return {
         ...state,
@@ -367,17 +442,66 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
           ...state.project,
           artwork: action.artwork,
           canvas: { width: action.artwork.width, height: action.artwork.height },
+          boneSpace: 'canvas',
+          bones,
           updatedAt: new Date().toISOString()
         },
         mode: 'setup',
         tool: 'select',
-        selection: selectedLayer ? { kind: 'artwork-layer', id: selectedLayer.id } : null,
+        zoom: 1,
+        selection,
+        selections: selection ? [selection] : [],
         isPlaying: false,
         ghosting: false,
         showBones: false,
         geometrySelection: null
       }
     }
+    case 'create-bone': {
+      const bone = createBoneFromWorldSegment(
+        state.project.bones,
+        action.parentId,
+        action.start,
+        action.end,
+        nextBoneIdentity(state.project.bones)
+      )
+      return withSelections(
+        {
+          ...state,
+          mode: 'setup',
+          tool: 'create-bone',
+          isPlaying: false,
+          showBones: true,
+          project: {
+            ...state.project,
+            boneSpace: 'canvas',
+            bones: [...state.project.bones, bone],
+            updatedAt: new Date().toISOString()
+          }
+        },
+        [{ kind: 'bone', id: bone.id }]
+      )
+    }
+    case 'rename-bone': {
+      const bone = state.project.bones.find((candidate) => candidate.id === action.id)
+      if (!bone || boneNameValidationError(state.project.bones, bone.id, action.name)) return state
+
+      const name = normalizeBoneName(action.name)
+      if (name === bone.name) return state
+
+      return {
+        ...state,
+        project: {
+          ...state.project,
+          bones: state.project.bones.map((candidate) =>
+            candidate.id === bone.id ? { ...candidate, name } : candidate
+          ),
+          updatedAt: new Date().toISOString()
+        }
+      }
+    }
+    case 'delete-bone':
+      return deleteBoneFromEditorState(state, action.id, action.mode)
     case 'toggle-artwork-layer': {
       if (!state.project.artwork) return state
 
@@ -394,12 +518,37 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         }
       }
     }
-    case 'clear-artwork':
+    case 'bind-artwork-layer': {
+      const boneWorldMatrix = action.boneId
+        ? resolveBoneWorldMatrices(state.project.bones).get(action.boneId)
+        : null
+      if (action.boneId && !boneWorldMatrix) return state
+
       return {
         ...state,
-        project: { ...state.project, artwork: null },
-        selection: state.selection?.kind === 'artwork-layer' ? null : state.selection
+        project: updateArtworkLayer(state.project, action.layerId, (layer) => {
+          if (!action.boneId || !boneWorldMatrix) {
+            return { ...layer, boneId: undefined, boneBindPose: undefined }
+          }
+          return {
+            ...layer,
+            boneId: action.boneId,
+            boneBindPose: [...boneWorldMatrix]
+          }
+        })
       }
+    }
+    case 'clear-artwork': {
+      const selections = state.selections.filter((selection) => selection.kind !== 'artwork-layer')
+      return withSelections(
+        {
+          ...state,
+          project: { ...state.project, artwork: null },
+          geometrySelection: null
+        },
+        selections
+      )
+    }
     case 'set-geometry-selection':
       return { ...state, geometrySelection: action.selection }
     case 'set-weight-brush':
@@ -499,7 +648,10 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
           layer.clipping ? { ...layer, clipping: { ...layer.clipping, ...action.changes } } : layer
         )
       }
-    case 'paint-artwork-weights':
+    case 'paint-artwork-weights': {
+      const boneWorldMatrix = state.weightBrush.boneId
+        ? resolveBoneWorldMatrices(state.project.bones).get(state.weightBrush.boneId)
+        : undefined
       return {
         ...state,
         project: updateArtworkLayer(state.project, action.layerId, (layer) => {
@@ -514,19 +666,21 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
           return {
             ...layer,
             mesh:
-              bone && !painted.bindPose?.[bone.id]
+              bone && boneWorldMatrix && !painted.bindPose?.[bone.id]
                 ? {
                     ...painted,
                     bindPose: {
                       ...painted.bindPose,
-                      [bone.id]: matrixFromTransform(bone.transform)
+                      [bone.id]: boneWorldMatrix
                     }
                   }
                 : painted
           }
         })
       }
-    case 'set-vertex-weight':
+    }
+    case 'set-vertex-weight': {
+      const boneWorldMatrix = resolveBoneWorldMatrices(state.project.bones).get(action.boneId)
       return {
         ...state,
         project: updateArtworkLayer(state.project, action.layerId, (layer) => {
@@ -538,10 +692,10 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
             mesh: {
               ...layer.mesh,
               bindPose:
-                bone && !layer.mesh.bindPose?.[bone.id]
+                bone && boneWorldMatrix && !layer.mesh.bindPose?.[bone.id]
                   ? {
                       ...layer.mesh.bindPose,
-                      [bone.id]: matrixFromTransform(bone.transform)
+                      [bone.id]: boneWorldMatrix
                     }
                   : layer.mesh.bindPose,
               vertices: layer.mesh.vertices.map((vertex) => {
@@ -562,6 +716,7 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
           }
         })
       }
+    }
     case 'add-clip-vertex':
       return {
         ...state,
@@ -613,6 +768,7 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         state.duration,
         action.track.startFrame + Math.ceil(action.track.durationSeconds * state.fps)
       )
+      const selection: EditorSelection = { kind: 'audio', id: action.track.id }
       return {
         ...state,
         project: {
@@ -628,7 +784,8 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         },
         duration,
         timelineView: 'audio',
-        selection: { kind: 'audio', id: action.track.id }
+        selection,
+        selections: [selection]
       }
     }
     case 'update-audio-track':
@@ -644,33 +801,44 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
       }
     case 'remove-audio-track': {
       const audioTracks = state.project.audioTracks.filter((track) => track.id !== action.id)
-      const selection =
-        state.selection?.kind === 'audio' && state.selection.id === action.id
-          ? audioTracks[0]
-            ? { kind: 'audio' as const, id: audioTracks[0].id }
-            : null
-          : state.selection
-      return {
-        ...state,
-        selection,
-        project: {
-          ...state.project,
-          audioTracks,
-          updatedAt: new Date().toISOString()
-        }
+      let selections = state.selections.filter(
+        (selection) => !(selection.kind === 'audio' && selection.id === action.id)
+      )
+      if (
+        selections.length === 0 &&
+        state.selection?.kind === 'audio' &&
+        state.selection.id === action.id &&
+        audioTracks[0]
+      ) {
+        selections = [{ kind: 'audio', id: audioTracks[0].id }]
       }
+      return withSelections(
+        {
+          ...state,
+          project: {
+            ...state.project,
+            audioTracks,
+            updatedAt: new Date().toISOString()
+          }
+        },
+        selections
+      )
     }
     case 'update-transform': {
       const transform = { ...state.transform, ...action.changes }
-      const project = state.project.bones.some((bone) => bone.id === state.selection?.id)
-        ? {
-            ...state.project,
-            updatedAt: new Date().toISOString(),
-            bones: state.project.bones.map((bone) =>
-              bone.id === state.selection?.id ? { ...bone, transform: { ...transform } } : bone
-            )
-          }
-        : state.project
+      const writesSetupPose = state.mode === 'setup' || !state.autoKey
+      const project =
+        writesSetupPose && state.project.bones.some((bone) => bone.id === state.selection?.id)
+          ? {
+              ...state.project,
+              updatedAt: new Date().toISOString(),
+              bones: state.project.bones.map((bone) =>
+                bone.id === state.selection?.id
+                  ? { ...bone, transform: { ...bone.transform, ...action.changes } }
+                  : bone
+              )
+            }
+          : state.project
 
       return {
         ...state,
@@ -679,21 +847,25 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         keyframes: upsertTransformKeys(state, action.changes)
       }
     }
-    case 'reset-transform':
+    case 'reset-transform': {
+      const writesSetupPose = state.mode === 'setup' || !state.autoKey
       return {
         ...state,
-        project: {
-          ...state.project,
-          bones: state.project.bones.map((bone) =>
-            bone.id === state.selection?.id
-              ? { ...bone, transform: { ...DEFAULT_TRANSFORM } }
-              : bone
-          ),
-          updatedAt: new Date().toISOString()
-        },
+        project: writesSetupPose
+          ? {
+              ...state.project,
+              bones: state.project.bones.map((bone) =>
+                bone.id === state.selection?.id
+                  ? { ...bone, transform: { ...DEFAULT_TRANSFORM } }
+                  : bone
+              ),
+              updatedAt: new Date().toISOString()
+            }
+          : state.project,
         transform: { ...DEFAULT_TRANSFORM },
         keyframes: upsertTransformKeys(state, DEFAULT_TRANSFORM)
       }
+    }
     case 'update-physics': {
       const physics = { ...state.physics, ...action.changes }
       const project = {
@@ -749,15 +921,15 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         ...state,
         keyframes: state.keyframes.filter((keyframe) => keyframe.id !== action.id)
       }
-    case 'reset-demo':
-      return createInitialEditorState()
   }
 }
 
 export interface EditorActions {
+  loadProject: (state: EditorState) => void
   setMode: (mode: EditorMode) => void
   setTool: (tool: EditorTool) => void
   select: (selection: EditorSelection) => void
+  selectMany: (selections: EditorSelection[]) => void
   clearSelection: () => void
   setFrame: (frame: number) => void
   setFps: (fps: number) => void
@@ -782,7 +954,11 @@ export interface EditorActions {
   setActiveAnimation: (id: string) => void
   configureProject: (name: string, width: number, height: number, fps: number) => void
   setArtwork: (artwork: ArtworkDocument) => void
+  createBone: (parentId: string | null, start: Point, end: Point) => void
+  renameBone: (id: string, name: string) => void
+  deleteBone: (id: string, mode: BoneDeletionMode) => void
   toggleArtworkLayer: (id: string) => void
+  bindArtworkLayer: (layerId: string, boneId: string | null) => void
   clearArtwork: () => void
   setGeometrySelection: (selection: GeometrySelection | null) => void
   setWeightBrush: (changes: Partial<WeightBrush>) => void
@@ -820,7 +996,6 @@ export interface EditorActions {
   ) => void
   moveKeyframe: (id: string, frame: number) => void
   removeKeyframe: (id: string) => void
-  resetDemo: () => void
 }
 
 export interface EditorContextValue {
@@ -836,10 +1011,12 @@ export const EditorProvider = ({ children }: PropsWithChildren): React.JSX.Eleme
 
   const actions = useMemo<EditorActions>(
     () => ({
+      loadProject: (state) => dispatch({ type: 'load-project', state }),
       setMode: (mode) => dispatch({ type: 'set-mode', mode }),
       setTool: (tool) => dispatch({ type: 'set-tool', tool }),
       select: (selection) => dispatch({ type: 'set-selection', selection }),
-      clearSelection: () => dispatch({ type: 'set-selection', selection: null }),
+      selectMany: (selections) => dispatch({ type: 'set-selections', selections }),
+      clearSelection: () => dispatch({ type: 'set-selections', selections: [] }),
       setFrame: (frame) => dispatch({ type: 'set-frame', frame }),
       setFps: (fps) => dispatch({ type: 'set-fps', fps }),
       setDuration: (duration) => dispatch({ type: 'set-duration', duration }),
@@ -865,7 +1042,12 @@ export const EditorProvider = ({ children }: PropsWithChildren): React.JSX.Eleme
       configureProject: (name, width, height, fps) =>
         dispatch({ type: 'configure-project', name, width, height, fps }),
       setArtwork: (artwork) => dispatch({ type: 'set-artwork', artwork }),
+      createBone: (parentId, start, end) => dispatch({ type: 'create-bone', parentId, start, end }),
+      renameBone: (id, name) => dispatch({ type: 'rename-bone', id, name }),
+      deleteBone: (id, mode) => dispatch({ type: 'delete-bone', id, mode }),
       toggleArtworkLayer: (id) => dispatch({ type: 'toggle-artwork-layer', id }),
+      bindArtworkLayer: (layerId, boneId) =>
+        dispatch({ type: 'bind-artwork-layer', layerId, boneId }),
       clearArtwork: () => dispatch({ type: 'clear-artwork' }),
       setGeometrySelection: (selection) => dispatch({ type: 'set-geometry-selection', selection }),
       setWeightBrush: (changes) => dispatch({ type: 'set-weight-brush', changes }),
@@ -903,8 +1085,7 @@ export const EditorProvider = ({ children }: PropsWithChildren): React.JSX.Eleme
           keyframe: { trackId, targetId, property, frame, value, interpolation }
         }),
       moveKeyframe: (id, frame) => dispatch({ type: 'move-keyframe', id, frame }),
-      removeKeyframe: (id) => dispatch({ type: 'remove-keyframe', id }),
-      resetDemo: () => dispatch({ type: 'reset-demo' })
+      removeKeyframe: (id) => dispatch({ type: 'remove-keyframe', id })
     }),
     [state.autoKey, state.ghosting, state.isPlaying, state.loop, state.physicsEnabled, state.zoom]
   )

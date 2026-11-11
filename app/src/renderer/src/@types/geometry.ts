@@ -9,5 +9,9 @@ export interface Transform {
   rotation: number
   scaleX: number
   scaleY: number
+  /** Rotation offset, in degrees, applied to the transform's local X axis. */
+  shearX?: number
+  /** Rotation offset, in degrees, applied to the transform's local Y axis. */
+  shearY?: number
   opacity: number
 }

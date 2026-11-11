@@ -2,7 +2,8 @@ import { useId, type CSSProperties, type PointerEventHandler } from 'react'
 
 import type { ArtworkLayer } from '@/@types/artwork'
 import type { Point } from '@/@types/geometry'
-import type { ArtworkGeometry, MeshDeformValue } from '@/@types/mesh'
+import type { ArtworkGeometry, Matrix2D, MeshDeformValue } from '@/@types/mesh'
+import { artworkLayerMatrix } from '@/lib/artwork-bone-binding'
 import { affineFromTriangles, resolveMeshTriangles, svgMatrix } from '@/lib/mesh-geometry'
 
 export type RenderableArtworkLayer = ArtworkLayer & ArtworkGeometry
@@ -10,6 +11,7 @@ export type RenderableArtworkLayer = ArtworkLayer & ArtworkGeometry
 export interface ArtworkLayerRendererProps {
   layer: RenderableArtworkLayer
   deformation?: MeshDeformValue['offsets'] | null
+  boneWorldMatrix?: Matrix2D | null
   className?: string
   interactive?: boolean
   onPointerDown?: PointerEventHandler<SVGGElement>
@@ -26,6 +28,7 @@ const polygonPoints = (points: Point[]): string =>
 export function ArtworkLayerRenderer({
   layer,
   deformation,
+  boneWorldMatrix,
   className,
   interactive = true,
   onPointerDown
@@ -42,6 +45,7 @@ export function ArtworkLayerRenderer({
   const blendStyle: CSSProperties = {
     mixBlendMode: layer.blendMode as CSSProperties['mixBlendMode']
   }
+  const layerMatrix = artworkLayerMatrix(layer, boneWorldMatrix)
 
   const image = (
     <image
@@ -91,7 +95,7 @@ export function ArtworkLayerRenderer({
   return (
     <g
       className={className}
-      transform={`translate(${layer.x} ${layer.y})`}
+      transform={svgMatrix(layerMatrix)}
       opacity={layer.opacity}
       style={blendStyle}
       pointerEvents={interactive ? 'visiblePainted' : 'none'}

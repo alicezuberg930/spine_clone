@@ -22,14 +22,13 @@ const finiteOr = (value: number, fallback = 0): number =>
   Number.isFinite(value) ? value : fallback
 
 export function matrixFromTransform(transform: Transform): Matrix2D {
-  const radians = (transform.rotation * Math.PI) / 180
-  const cosine = Math.cos(radians)
-  const sine = Math.sin(radians)
+  const xAxis = ((transform.rotation + (transform.shearX ?? 0)) * Math.PI) / 180
+  const yAxis = ((transform.rotation + 90 + (transform.shearY ?? 0)) * Math.PI) / 180
   return [
-    cosine * transform.scaleX,
-    sine * transform.scaleX,
-    -sine * transform.scaleY,
-    cosine * transform.scaleY,
+    Math.cos(xAxis) * transform.scaleX,
+    Math.sin(xAxis) * transform.scaleX,
+    Math.cos(yAxis) * transform.scaleY,
+    Math.sin(yAxis) * transform.scaleY,
     transform.x,
     transform.y
   ]
@@ -44,6 +43,28 @@ function multiplyMatrices(left: Matrix2D, right: Matrix2D): Matrix2D {
     left[0] * right[4] + left[2] * right[5] + left[4],
     left[1] * right[4] + left[3] * right[5] + left[5]
   ]
+}
+
+function resolveWorldMatrices(bones: readonly Bone[]): Map<string, Matrix2D> {
+  const byId = new Map(bones.map((bone) => [bone.id, bone]))
+  const matrices = new Map<string, Matrix2D>()
+  const resolving = new Set<string>()
+
+  const resolve = (bone: Bone): Matrix2D => {
+    const cached = matrices.get(bone.id)
+    if (cached) return cached
+    const local = matrixFromTransform(bone.transform)
+    if (resolving.has(bone.id)) return local
+    resolving.add(bone.id)
+    const parent = bone.parentId ? byId.get(bone.parentId) : undefined
+    const world = parent ? multiplyMatrices(resolve(parent), local) : local
+    resolving.delete(bone.id)
+    matrices.set(bone.id, world)
+    return world
+  }
+
+  bones.forEach(resolve)
+  return matrices
 }
 
 function invertMatrix(matrix: Matrix2D): Matrix2D | null {
@@ -69,38 +90,43 @@ function transformPoint(matrix: Matrix2D, point: Point): Point {
 /** Returns per-vertex offsets produced by the current bones relative to their captured bind pose. */
 export function weightedMeshDeformation(
   mesh: ArtworkMesh,
-  bones: Bone[]
+  bones: Bone[],
+  layerOrigin: Point = { x: 0, y: 0 }
 ): MeshDeformValue['offsets'] {
   if (!mesh.bindPose) return {}
-  const bonesById = new Map(bones.map((bone) => [bone.id, bone]))
+  const worldMatrices = resolveWorldMatrices(bones)
   const deltas = new Map<string, Matrix2D>()
   Object.entries(mesh.bindPose).forEach(([boneId, bindMatrix]) => {
-    const bone = bonesById.get(boneId)
+    const worldMatrix = worldMatrices.get(boneId)
     const inverseBind = invertMatrix(bindMatrix)
-    if (!bone || !inverseBind) return
-    deltas.set(boneId, multiplyMatrices(matrixFromTransform(bone.transform), inverseBind))
+    if (!worldMatrix || !inverseBind) return
+    deltas.set(boneId, multiplyMatrices(worldMatrix, inverseBind))
   })
 
   return Object.fromEntries(
     mesh.vertices.map((vertex) => {
-      let x = vertex.position.x
-      let y = vertex.position.y
+      const documentPoint = {
+        x: vertex.position.x + layerOrigin.x,
+        y: vertex.position.y + layerOrigin.y
+      }
+      let x = documentPoint.x
+      let y = documentPoint.y
       let totalWeight = 0
       let weightedX = 0
       let weightedY = 0
       vertex.weights.forEach((weight) => {
         const delta = deltas.get(weight.boneId)
         if (!delta || weight.value <= 0) return
-        const point = transformPoint(delta, vertex.position)
+        const point = transformPoint(delta, documentPoint)
         weightedX += point.x * weight.value
         weightedY += point.y * weight.value
         totalWeight += weight.value
       })
       if (totalWeight > EPSILON) {
-        x = weightedX + vertex.position.x * Math.max(0, 1 - totalWeight)
-        y = weightedY + vertex.position.y * Math.max(0, 1 - totalWeight)
+        x = weightedX + documentPoint.x * Math.max(0, 1 - totalWeight)
+        y = weightedY + documentPoint.y * Math.max(0, 1 - totalWeight)
       }
-      return [vertex.id, { x: x - vertex.position.x, y: y - vertex.position.y }]
+      return [vertex.id, { x: x - documentPoint.x, y: y - documentPoint.y }]
     })
   )
 }

@@ -11,7 +11,9 @@ export type EditorTool =
   | 'translate'
   | 'rotate'
   | 'scale'
+  | 'shear'
   | 'pose'
+  | 'create-bone'
   | 'mesh'
   | 'deform'
   | 'weights'
@@ -19,6 +21,9 @@ export type EditorTool =
   | 'bounds'
 
 export type TimelineView = 'dopesheet' | 'graph' | 'audio'
+
+/** Determines what happens to a bone's descendants when the bone is deleted. */
+export type BoneDeletionMode = 'branch' | 'reparent'
 
 export type SelectionKind =
   | 'skeleton'
@@ -45,6 +50,7 @@ export interface EditorState {
   mode: EditorMode
   tool: EditorTool
   selection: EditorSelection | null
+  selections: EditorSelection[]
   frame: number
   fps: number
   duration: number

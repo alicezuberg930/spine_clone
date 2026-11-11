@@ -9,6 +9,7 @@ interface EditorTopbarProps {
   mode: EditorMode
   onModeChange: (mode: EditorMode) => void
   onNewProject: () => void
+  onOpenProject: () => void
   onImportArtwork: () => void
   onImportAudio: () => void
   onSaveProject: () => void
@@ -17,7 +18,8 @@ interface EditorTopbarProps {
   onExportVideo: () => void
   onFeatureNotImplemented: (feature: string) => void
   onInsertKey: () => void
-  onResetDemo: () => void
+  onDeleteBone: () => void
+  canDeleteBone: boolean
   onToggle: (
     key: 'showGrid' | 'showBones' | 'showMesh' | 'showBounds' | 'ghosting' | 'audioEnabled'
   ) => void
@@ -31,6 +33,7 @@ export function EditorTopbar({
   mode,
   onModeChange,
   onNewProject,
+  onOpenProject,
   onImportArtwork,
   onImportAudio,
   onSaveProject,
@@ -39,7 +42,8 @@ export function EditorTopbar({
   onExportVideo,
   onFeatureNotImplemented,
   onInsertKey,
-  onResetDemo,
+  onDeleteBone,
+  canDeleteBone,
   onToggle,
   flags
 }: EditorTopbarProps): React.JSX.Element {
@@ -47,6 +51,7 @@ export function EditorTopbar({
     <header className="surface-glow flex h-11 shrink-0 items-center border-b border-border/85 bg-[#0d171d] px-2">
       <EditorMenubar
         onNewProject={onNewProject}
+        onOpenProject={onOpenProject}
         onImportArtwork={onImportArtwork}
         onImportAudio={onImportAudio}
         onSaveProject={onSaveProject}
@@ -55,7 +60,8 @@ export function EditorTopbar({
         onExportVideo={onExportVideo}
         onFeatureNotImplemented={onFeatureNotImplemented}
         onInsertKey={onInsertKey}
-        onResetDemo={onResetDemo}
+        onDeleteBone={onDeleteBone}
+        canDeleteBone={canDeleteBone}
         onToggle={onToggle}
         flags={flags}
       />

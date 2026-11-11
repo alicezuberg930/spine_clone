@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Aperture,
   AudioWaveform,
@@ -21,6 +21,7 @@ import {
   Shirt,
   Spline,
   SquareDashed,
+  Trash2,
   Upload,
   WandSparkles
 } from 'lucide-react'
@@ -33,20 +34,34 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type {
   ArtworkDocument,
   ArtworkLayer,
+  Attachment,
   AudioTrack,
   Bone as BoneType,
-  Constraint
+  Constraint,
+  Skin,
+  Slot
 } from '@/@types'
-import { createConstraintTreeNodes } from '@/lib/hierarchy-model'
+import {
+  createConstraintTreeNodes,
+  filterHierarchyRows,
+  hierarchyRowHasChildren,
+  visibleHierarchyRows
+} from '@/lib/hierarchy-model'
 import { cn } from '@/lib/utils'
 
 interface HierarchyPanelProps {
-  selectedId: string
+  projectName: string
+  selectedIds: string[]
   onSelect: (id: string) => void
+  onDeleteBone: (id: string) => void
+  onRenameBone: (id: string) => void
   artwork: ArtworkDocument | null
   audioTracks: AudioTrack[]
   bones: BoneType[]
+  slots: Slot[]
+  attachments: Attachment[]
   constraints: Constraint[]
+  skins: Skin[]
   onArtworkLayerSelect: (id: string) => void
   onArtworkLayerVisibilityChange: (id: string) => void
   onImportArtwork: () => void
@@ -60,7 +75,6 @@ type TreeNode = {
   name: string
   type: 'root' | 'bone' | 'slot' | 'mesh' | 'constraint' | 'bounds' | 'audio'
   depth: number
-  open?: boolean
   muted?: boolean
 }
 
@@ -79,25 +93,6 @@ type ArtworkTreeRow =
       layer: ArtworkLayer
     }
 
-const nodes: TreeNode[] = [
-  { id: 'bone-root', name: 'Meadow runner', type: 'root', depth: 0, open: true },
-  { id: 'bone-pelvis', name: 'hips', type: 'bone', depth: 1, open: true },
-  { id: 'bone-torso', name: 'torso', type: 'bone', depth: 2, open: true },
-  { id: 'bone-chest', name: 'chest', type: 'bone', depth: 3, open: true },
-  { id: 'bone-neck', name: 'neck', type: 'bone', depth: 4 },
-  { id: 'bone-head', name: 'head', type: 'mesh', depth: 5 },
-  { id: 'bone-arm-l', name: 'arm · left', type: 'bone', depth: 3 },
-  { id: 'bone-arm-r', name: 'arm · right', type: 'bone', depth: 3 },
-  { id: 'bone-thigh-l', name: 'leg · left', type: 'bone', depth: 2 },
-  { id: 'bone-thigh-r', name: 'leg · right', type: 'bone', depth: 2 },
-  { id: 'slots', name: 'Slots', type: 'slot', depth: 1, open: true },
-  { id: 'slot-head', name: 'face / blink', type: 'slot', depth: 2 },
-  { id: 'slot-torso', name: 'jacket / moss', type: 'slot', depth: 2 },
-  { id: 'attachment-cape', name: 'scarf · weighted', type: 'mesh', depth: 2 },
-  { id: 'attachment-hurtbox', name: 'Bounds · body hitbox', type: 'bounds', depth: 1 },
-  { id: 'audio', name: 'Audio · forest-loop.ogg', type: 'audio', depth: 1 }
-]
-
 const iconByType = {
   root: Aperture,
   bone: Bone,
@@ -107,12 +102,6 @@ const iconByType = {
   bounds: SquareDashed,
   audio: AudioWaveform
 }
-
-const skins = [
-  { id: 'skin-ember', name: 'Ember trail', colors: ['#ff9a68', '#934b4e'] },
-  { id: 'skin-night', name: 'Moon courier', colors: ['#8ea9ff', '#675a9f'] },
-  { id: 'skin-rig', name: 'Rig diagnostics', colors: ['#45d6bd', '#2e756a'] }
-]
 
 function createArtworkTreeRows(artwork: ArtworkDocument, query: string): ArtworkTreeRow[] {
   const normalizedQuery = query.trim().toLowerCase()
@@ -147,53 +136,217 @@ function createArtworkTreeRows(artwork: ArtworkDocument, query: string): Artwork
   return rows
 }
 
+function createBoneTreeNodes(bones: readonly BoneType[], rootDepth = 1): TreeNode[] {
+  const knownIds = new Set(bones.map((bone) => bone.id))
+  const children = new Map<string | null, BoneType[]>()
+
+  bones.forEach((bone) => {
+    const parentId = bone.parentId && knownIds.has(bone.parentId) ? bone.parentId : null
+    const siblings = children.get(parentId) ?? []
+    siblings.push(bone)
+    children.set(parentId, siblings)
+  })
+
+  const rows: TreeNode[] = []
+  const visited = new Set<string>()
+  const visit = (bone: BoneType, depth: number): void => {
+    if (visited.has(bone.id)) return
+    visited.add(bone.id)
+    rows.push({
+      id: bone.id,
+      name: bone.name,
+      type: bone.parentId === null ? 'root' : 'bone',
+      depth
+    })
+    children.get(bone.id)?.forEach((child) => visit(child, depth + 1))
+  }
+
+  children.get(null)?.forEach((bone) => visit(bone, rootDepth))
+  bones.forEach((bone) => visit(bone, rootDepth))
+  return rows
+}
+
+function attachmentTreeType(attachment: Attachment): TreeNode['type'] {
+  return attachment.type === 'bounding-box' ? 'bounds' : 'mesh'
+}
+
+function createProjectTreeNodes(
+  bones: readonly BoneType[],
+  slots: readonly Slot[],
+  attachments: readonly Attachment[],
+  constraints: readonly Constraint[]
+): TreeNode[] {
+  const rows = createBoneTreeNodes(bones, 0)
+  const attachmentsBySlot = new Map<string, Attachment[]>()
+
+  attachments.forEach((attachment) => {
+    const slotAttachments = attachmentsBySlot.get(attachment.slotId) ?? []
+    slotAttachments.push(attachment)
+    attachmentsBySlot.set(attachment.slotId, slotAttachments)
+  })
+
+  if (slots.length > 0) {
+    rows.push({ id: 'project-slots', name: 'Slots', type: 'slot', depth: 0 })
+    const orderedSlots = [...slots].sort((left, right) => left.drawOrder - right.drawOrder)
+    orderedSlots.forEach((slot) => {
+      rows.push({ id: slot.id, name: slot.name, type: 'slot', depth: 1 })
+      const slotAttachments = attachmentsBySlot.get(slot.id) ?? []
+      slotAttachments.forEach((attachment) => {
+        rows.push({
+          id: attachment.id,
+          name: attachment.name,
+          type: attachmentTreeType(attachment),
+          depth: 2
+        })
+      })
+    })
+  }
+
+  const knownSlotIds = new Set(slots.map((slot) => slot.id))
+  const orphanedAttachments = attachments.filter(
+    (attachment) => !knownSlotIds.has(attachment.slotId)
+  )
+  if (orphanedAttachments.length > 0) {
+    rows.push({ id: 'project-attachments', name: 'Attachments', type: 'mesh', depth: 0 })
+    orphanedAttachments.forEach((attachment) => {
+      rows.push({
+        id: attachment.id,
+        name: attachment.name,
+        type: attachmentTreeType(attachment),
+        depth: 1
+      })
+    })
+  }
+
+  if (constraints.length > 0) {
+    rows.push({ id: 'project-constraints', name: 'Constraints', type: 'constraint', depth: 0 })
+    rows.push(
+      ...createConstraintTreeNodes(constraints).map((constraint) => ({
+        ...constraint,
+        depth: 1
+      }))
+    )
+  }
+
+  return rows
+}
+
 function TreeRow({
   node,
   selected,
-  onSelect
+  hasChildren,
+  expanded,
+  toggleDisabled = false,
+  onToggle,
+  onSelect,
+  onRename,
+  onDelete
 }: {
   node: TreeNode
   selected: boolean
+  hasChildren: boolean
+  expanded: boolean
+  toggleDisabled?: boolean
+  onToggle: () => void
   onSelect: () => void
+  onRename?: () => void
+  onDelete?: () => void
 }): React.JSX.Element {
   const Icon = iconByType[node.type]
   return (
-    <button
-      type="button"
-      onClick={onSelect}
+    <div
+      role="treeitem"
+      aria-level={node.depth + 1}
+      aria-selected={selected}
+      aria-expanded={hasChildren ? expanded : undefined}
       className={cn(
-        'group flex h-7 w-full items-center gap-1.5 rounded-[5px] pr-1 text-left text-[11px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground',
+        'group flex h-7 w-full items-center rounded-[5px] pr-1 text-[11px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground',
         selected && 'bg-primary/12 text-primary ring-1 ring-inset ring-primary/20'
       )}
       style={{ paddingLeft: 6 + node.depth * 12 }}
     >
-      {node.open ? (
-        <ChevronDown className="size-3 shrink-0 opacity-65" />
-      ) : node.type === 'root' ||
-        node.type === 'bone' ||
-        node.type === 'slot' ||
-        node.type === 'constraint' ? (
-        <ChevronRight className="size-3 shrink-0 opacity-55" />
+      {hasChildren ? (
+        <button
+          type="button"
+          className="grid size-5 shrink-0 place-items-center rounded-sm hover:bg-accent"
+          aria-label={`${expanded ? 'Collapse' : 'Expand'} ${node.name}`}
+          aria-expanded={expanded}
+          disabled={toggleDisabled}
+          onClick={onToggle}
+        >
+          {expanded ? (
+            <ChevronDown className="size-3 opacity-70" />
+          ) : (
+            <ChevronRight className="size-3 opacity-65" />
+          )}
+        </button>
       ) : (
-        <span className="w-3" />
+        <span className="w-5 shrink-0" />
       )}
-      <Icon className={cn('size-3.5 shrink-0', selected ? 'text-primary' : 'text-[#83a2af]')} />
-      <span className="min-w-0 flex-1 truncate">{node.name}</span>
-      <span className="hidden items-center gap-1 group-hover:flex">
-        {node.muted ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
-        <Lock className="size-3 opacity-60" />
-      </span>
-    </button>
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+        onClick={onSelect}
+        onDoubleClick={
+          onRename
+            ? (event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onRename()
+              }
+            : hasChildren && !toggleDisabled
+              ? onToggle
+              : undefined
+        }
+        onKeyDown={(event) => {
+          if (!hasChildren || toggleDisabled) return
+          if (event.key === 'ArrowRight' && !expanded) {
+            event.preventDefault()
+            onToggle()
+          } else if (event.key === 'ArrowLeft' && expanded) {
+            event.preventDefault()
+            onToggle()
+          }
+        }}
+      >
+        <Icon className={cn('size-3.5 shrink-0', selected ? 'text-primary' : 'text-[#83a2af]')} />
+        <span className="min-w-0 flex-1 truncate">{node.name}</span>
+        <span className="hidden items-center gap-1 group-hover:flex">
+          {node.muted ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+          <Lock className="size-3 opacity-60" />
+        </span>
+      </button>
+      {onDelete ? (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          className="size-6 shrink-0 text-muted-foreground opacity-0 hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100"
+          aria-label={`Delete bone ${node.name}`}
+          onClick={(event) => {
+            event.stopPropagation()
+            onDelete()
+          }}
+        >
+          <Trash2 />
+        </Button>
+      ) : null}
+    </div>
   )
 }
 
 export function HierarchyPanel({
-  selectedId,
+  projectName,
+  selectedIds,
   onSelect,
+  onDeleteBone,
+  onRenameBone,
   artwork,
   audioTracks,
   bones,
+  slots,
+  attachments,
   constraints,
+  skins,
   onArtworkLayerSelect,
   onArtworkLayerVisibilityChange,
   onImportArtwork,
@@ -202,28 +355,111 @@ export function HierarchyPanel({
   onFeatureNotImplemented
 }: HierarchyPanelProps): React.JSX.Element {
   const [filter, setFilter] = useState('')
-  const artworkRows = useMemo(
-    () => (artwork ? createArtworkTreeRows(artwork, filter) : []),
-    [artwork, filter]
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(() => new Set())
+  const normalizedFilter = filter.trim().toLowerCase()
+  const highlightedIds = useMemo(() => new Set(selectedIds), [selectedIds])
+  const boneIds = useMemo(() => new Set(bones.map((bone) => bone.id)), [bones])
+  const artworkRootId = artwork ? `artwork-root-${artwork.id}` : 'artwork-root'
+  const importedRigRootId = artwork ? `rig-bones-${artwork.id}` : 'rig-bones'
+  const artworkRows = useMemo(() => (artwork ? createArtworkTreeRows(artwork, '') : []), [artwork])
+  const visibleArtworkRows = useMemo(() => {
+    if (!artwork) return []
+    if (normalizedFilter) return createArtworkTreeRows(artwork, normalizedFilter)
+    if (collapsedIds.has(artworkRootId)) return []
+    return visibleHierarchyRows(artworkRows, collapsedIds)
+  }, [artwork, artworkRootId, artworkRows, collapsedIds, normalizedFilter])
+  const artworkParentIds = useMemo(
+    () =>
+      new Set(
+        artworkRows
+          .filter((_, index) => hierarchyRowHasChildren(artworkRows, index))
+          .map((row) => row.id)
+      ),
+    [artworkRows]
   )
-  const filteredDemoNodes = useMemo(() => {
-    const query = filter.trim().toLowerCase()
-    const projectNodes: TreeNode[] = [
-      ...nodes.filter((node) => node.type !== 'audio' && node.id !== 'attachment-hurtbox'),
-      { id: 'constraints', name: 'Constraints', type: 'constraint', depth: 1, open: true },
-      ...createConstraintTreeNodes(constraints),
-      ...nodes.filter((node) => node.id === 'attachment-hurtbox')
-    ]
-    return query
-      ? projectNodes.filter((node) => node.name.toLowerCase().includes(query))
-      : projectNodes
-  }, [constraints, filter])
+  const projectNodes = useMemo(
+    () => createProjectTreeNodes(bones, slots, attachments, constraints),
+    [attachments, bones, constraints, slots]
+  )
+  const visibleProjectNodes = useMemo(
+    () =>
+      normalizedFilter
+        ? filterHierarchyRows(projectNodes, (node) =>
+            node.name.toLowerCase().includes(normalizedFilter)
+          )
+        : visibleHierarchyRows(projectNodes, collapsedIds),
+    [collapsedIds, normalizedFilter, projectNodes]
+  )
+  const projectParentIds = useMemo(
+    () =>
+      new Set(
+        projectNodes
+          .filter((_, index) => hierarchyRowHasChildren(projectNodes, index))
+          .map((node) => node.id)
+      ),
+    [projectNodes]
+  )
+  const importedBoneNodes = useMemo(() => createBoneTreeNodes(bones), [bones])
+  const visibleImportedBoneNodes = useMemo(() => {
+    if (!artwork) return []
+    if (normalizedFilter) {
+      return filterHierarchyRows(importedBoneNodes, (node) =>
+        node.name.toLowerCase().includes(normalizedFilter)
+      )
+    }
+    if (collapsedIds.has(importedRigRootId)) return []
+    return visibleHierarchyRows(importedBoneNodes, collapsedIds)
+  }, [artwork, collapsedIds, importedBoneNodes, importedRigRootId, normalizedFilter])
+  const importedBoneParentIds = useMemo(
+    () =>
+      new Set(
+        importedBoneNodes
+          .filter((_, index) => hierarchyRowHasChildren(importedBoneNodes, index))
+          .map((node) => node.id)
+      ),
+    [importedBoneNodes]
+  )
+  const knownBoneIdsRef = useRef(new Set(bones.map((bone) => bone.id)))
+
+  useEffect(() => {
+    const previousIds = knownBoneIdsRef.current
+    const currentIds = new Set(bones.map((bone) => bone.id))
+    knownBoneIdsRef.current = currentIds
+    const createdBoneId = [...selectedIds]
+      .reverse()
+      .find((id) => currentIds.has(id) && !previousIds.has(id))
+    if (!createdBoneId) return
+
+    const byId = new Map(bones.map((bone) => [bone.id, bone]))
+    const ancestors = new Set<string>([importedRigRootId])
+    let current = byId.get(createdBoneId)
+    while (current?.parentId) {
+      if (ancestors.has(current.parentId)) break
+      ancestors.add(current.parentId)
+      current = byId.get(current.parentId)
+    }
+    setCollapsedIds((collapsed) => {
+      if (![...ancestors].some((id) => collapsed.has(id))) return collapsed
+      const next = new Set(collapsed)
+      ancestors.forEach((id) => next.delete(id))
+      return next
+    })
+  }, [bones, importedRigRootId, selectedIds])
+
+  const toggleBranch = (id: string): void => {
+    setCollapsedIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   return (
     <section className="panel-sheen flex h-full min-h-0 flex-col">
       <PanelHeader
         title="Project"
-        eyebrow={artwork ? (artwork.layers[0]?.sourceFileName ?? artwork.name) : 'meadow-runner.lf'}
+        eyebrow={artwork ? (artwork.layers[0]?.sourceFileName ?? artwork.name) : projectName}
         actions={
           <>
             <Button
@@ -247,11 +483,7 @@ export function HierarchyPanel({
           </>
         }
       />
-      <Tabs
-        key={artwork?.id ?? 'demo-project'}
-        defaultValue="tree"
-        className="min-h-0 flex-1 gap-0"
-      >
+      <Tabs key={artwork?.id ?? projectName} defaultValue="tree" className="min-h-0 flex-1 gap-0">
         <TabsList
           variant="line"
           className="h-9 w-full shrink-0 justify-start gap-2 border-b border-border/70 px-2"
@@ -272,7 +504,7 @@ export function HierarchyPanel({
             <Search className="pointer-events-none absolute left-4 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label="Filter hierarchy"
-              placeholder={artwork ? 'Filter imported layers' : 'Filter hierarchy'}
+              placeholder={artwork ? 'Filter layers and bones' : 'Filter hierarchy'}
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
               className="h-7 border-border/70 bg-background/50 pl-8 text-[11px]"
@@ -280,33 +512,81 @@ export function HierarchyPanel({
           </div>
           <ScrollArea className="min-h-0 flex-1 px-1.5 pb-2">
             {artwork ? (
-              <div className="space-y-0.5">
-                <div className="flex h-8 items-center gap-1.5 rounded-md bg-primary/8 px-1.5 text-[11px] font-medium text-primary ring-1 ring-inset ring-primary/15">
-                  <ChevronDown className="size-3 shrink-0 opacity-70" />
+              <div role="tree" aria-label="Imported artwork hierarchy" className="space-y-0.5">
+                <div
+                  role="treeitem"
+                  aria-level={1}
+                  aria-expanded={normalizedFilter ? true : !collapsedIds.has(artworkRootId)}
+                  className="flex h-8 items-center rounded-md bg-primary/8 px-1.5 text-[11px] font-medium text-primary ring-1 ring-inset ring-primary/15"
+                >
+                  <button
+                    type="button"
+                    className="grid size-5 shrink-0 place-items-center rounded-sm hover:bg-primary/10"
+                    aria-label={`${normalizedFilter || !collapsedIds.has(artworkRootId) ? 'Collapse' : 'Expand'} ${artwork.name}`}
+                    aria-expanded={normalizedFilter ? true : !collapsedIds.has(artworkRootId)}
+                    disabled={Boolean(normalizedFilter)}
+                    onClick={() => toggleBranch(artworkRootId)}
+                  >
+                    {normalizedFilter || !collapsedIds.has(artworkRootId) ? (
+                      <ChevronDown className="size-3 opacity-70" />
+                    ) : (
+                      <ChevronRight className="size-3 opacity-65" />
+                    )}
+                  </button>
                   <Aperture className="size-3.5 shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{artwork.name}</span>
+                  <span className="ml-1.5 min-w-0 flex-1 truncate">{artwork.name}</span>
                   <span className="text-[9px] font-normal text-muted-foreground">
                     {artwork.layers.length}
                   </span>
                 </div>
 
-                {artworkRows.map((row) =>
+                {visibleArtworkRows.map((row) =>
                   row.kind === 'group' ? (
                     <div
                       key={row.id}
-                      className="flex h-7 items-center gap-1.5 rounded-[5px] pr-1 text-[11px] text-muted-foreground"
+                      role="treeitem"
+                      aria-level={row.depth + 1}
+                      aria-expanded={normalizedFilter ? true : !collapsedIds.has(row.id)}
+                      className="flex h-7 items-center rounded-[5px] pr-1 text-[11px] text-muted-foreground hover:bg-accent/70 hover:text-foreground"
                       style={{ paddingLeft: 6 + row.depth * 12 }}
                     >
-                      <ChevronDown className="size-3 shrink-0 opacity-65" />
-                      <Folder className="size-3.5 shrink-0 text-[#83a2af]" />
-                      <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                      {artworkParentIds.has(row.id) ? (
+                        <button
+                          type="button"
+                          className="grid size-5 shrink-0 place-items-center rounded-sm hover:bg-accent"
+                          aria-label={`${normalizedFilter || !collapsedIds.has(row.id) ? 'Collapse' : 'Expand'} ${row.name}`}
+                          aria-expanded={normalizedFilter ? true : !collapsedIds.has(row.id)}
+                          disabled={Boolean(normalizedFilter)}
+                          onClick={() => toggleBranch(row.id)}
+                        >
+                          {normalizedFilter || !collapsedIds.has(row.id) ? (
+                            <ChevronDown className="size-3 opacity-70" />
+                          ) : (
+                            <ChevronRight className="size-3 opacity-65" />
+                          )}
+                        </button>
+                      ) : (
+                        <span className="w-5 shrink-0" />
+                      )}
+                      <button
+                        type="button"
+                        className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                        disabled={Boolean(normalizedFilter)}
+                        onClick={() => toggleBranch(row.id)}
+                      >
+                        <Folder className="size-3.5 shrink-0 text-[#83a2af]" />
+                        <span className="min-w-0 flex-1 truncate">{row.name}</span>
+                      </button>
                     </div>
                   ) : (
                     <div
                       key={row.id}
+                      role="treeitem"
+                      aria-level={row.depth + 1}
+                      aria-selected={highlightedIds.has(row.id)}
                       className={cn(
                         'group flex h-7 min-w-0 items-center rounded-[5px] border border-transparent pr-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent/70 hover:text-foreground',
-                        selectedId === row.id && 'border-primary/20 bg-primary/12 text-primary'
+                        highlightedIds.has(row.id) && 'border-primary/20 bg-primary/12 text-primary'
                       )}
                       style={{ paddingLeft: 6 + row.depth * 12 }}
                     >
@@ -332,22 +612,45 @@ export function HierarchyPanel({
                   )
                 )}
 
-                {artworkRows.length === 0 ? (
+                {normalizedFilter && visibleArtworkRows.length === 0 ? (
                   <p className="px-3 py-8 text-center text-[10px] text-muted-foreground">
                     No imported layers match “{filter}”.
                   </p>
                 ) : null}
               </div>
             ) : (
-              <div className="space-y-0.5">
-                {filteredDemoNodes.map((node) => (
+              <div role="tree" aria-label="Rig hierarchy" className="space-y-0.5">
+                {visibleProjectNodes.map((node) => (
                   <TreeRow
                     key={node.id}
                     node={node}
-                    selected={selectedId === node.id}
+                    selected={highlightedIds.has(node.id)}
+                    hasChildren={projectParentIds.has(node.id)}
+                    expanded={normalizedFilter ? true : !collapsedIds.has(node.id)}
+                    toggleDisabled={Boolean(normalizedFilter)}
+                    onToggle={() => toggleBranch(node.id)}
                     onSelect={() => onSelect(node.id)}
+                    onRename={boneIds.has(node.id) ? () => onRenameBone(node.id) : undefined}
+                    onDelete={node.type === 'bone' ? () => onDeleteBone(node.id) : undefined}
                   />
                 ))}
+                {projectNodes.length === 0 && audioTracks.length === 0 ? (
+                  <div className="grid min-h-56 place-items-center px-5 py-8 text-center">
+                    <div className="flex flex-col gap-2 items-center">
+                      <p className="text-xs font-medium">Empty project</p>
+                      <p className="mx-auto mt-1 max-w-48 text-[10px] leading-4 text-muted-foreground">
+                        Import artwork or use the Create Bone tool to begin a rig.
+                      </p>
+                      <Button size="sm" className="mt-4" onClick={onImportArtwork}>
+                        <Upload /> Import artwork
+                      </Button>
+                    </div>
+                  </div>
+                ) : normalizedFilter && visibleProjectNodes.length === 0 ? (
+                  <p className="px-3 py-8 text-center text-[10px] text-muted-foreground">
+                    No project items match “{filter}”.
+                  </p>
+                ) : null}
               </div>
             )}
             {audioTracks.map((track) => (
@@ -357,7 +660,7 @@ export function HierarchyPanel({
                 onClick={() => onSelect(track.id)}
                 className={cn(
                   'mt-1 flex h-8 w-full items-center gap-2 rounded-md px-3 text-left text-[11px] text-muted-foreground hover:bg-accent/70 hover:text-foreground',
-                  selectedId === track.id &&
+                  highlightedIds.has(track.id) &&
                     'bg-primary/12 text-primary ring-1 ring-inset ring-primary/20'
                 )}
               >
@@ -367,23 +670,57 @@ export function HierarchyPanel({
               </button>
             ))}
             {artwork ? (
-              <div className="mt-2 border-t border-border/60 pt-2">
-                <div className="flex h-7 items-center gap-2 px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  <Bone className="size-3.5" /> Rig bones
+              <div
+                role="tree"
+                aria-label="Imported rig bones"
+                className="mt-2 border-t border-border/60 pt-2"
+              >
+                <div
+                  role="treeitem"
+                  aria-level={1}
+                  aria-expanded={normalizedFilter ? true : !collapsedIds.has(importedRigRootId)}
+                  className="flex h-7 items-center px-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground"
+                >
+                  <button
+                    type="button"
+                    className="grid size-5 shrink-0 place-items-center rounded-sm hover:bg-accent"
+                    aria-label={`${normalizedFilter || !collapsedIds.has(importedRigRootId) ? 'Collapse' : 'Expand'} rig bones`}
+                    aria-expanded={normalizedFilter ? true : !collapsedIds.has(importedRigRootId)}
+                    disabled={Boolean(normalizedFilter)}
+                    onClick={() => toggleBranch(importedRigRootId)}
+                  >
+                    {normalizedFilter || !collapsedIds.has(importedRigRootId) ? (
+                      <ChevronDown className="size-3 opacity-70" />
+                    ) : (
+                      <ChevronRight className="size-3 opacity-65" />
+                    )}
+                  </button>
+                  <Bone className="ml-1 size-3.5" />
+                  <span className="ml-1.5">Rig bones</span>
                 </div>
-                {bones.map((bone) => (
+                {visibleImportedBoneNodes.map((node) => (
                   <TreeRow
-                    key={bone.id}
-                    node={{
-                      id: bone.id,
-                      name: bone.name,
-                      type: 'bone',
-                      depth: bone.parentId ? 2 : 1
-                    }}
-                    selected={selectedId === bone.id}
-                    onSelect={() => onSelect(bone.id)}
+                    key={node.id}
+                    node={node}
+                    selected={highlightedIds.has(node.id)}
+                    hasChildren={importedBoneParentIds.has(node.id)}
+                    expanded={normalizedFilter ? true : !collapsedIds.has(node.id)}
+                    toggleDisabled={Boolean(normalizedFilter)}
+                    onToggle={() => toggleBranch(node.id)}
+                    onSelect={() => onSelect(node.id)}
+                    onRename={boneIds.has(node.id) ? () => onRenameBone(node.id) : undefined}
+                    onDelete={node.type === 'bone' ? () => onDeleteBone(node.id) : undefined}
                   />
                 ))}
+                {bones.length === 0 ? (
+                  <p className="px-7 py-3 text-[10px] text-muted-foreground">
+                    No bones yet. Use the Create Bone tool in the viewport.
+                  </p>
+                ) : normalizedFilter && visibleImportedBoneNodes.length === 0 ? (
+                  <p className="px-7 py-3 text-[10px] text-muted-foreground">
+                    No bones match “{filter}”.
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </ScrollArea>
@@ -395,36 +732,55 @@ export function HierarchyPanel({
               <div className="mb-3 flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium">Character variants</p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">Shared rig · 3 skins</p>
+                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                    {skins.length} {skins.length === 1 ? 'skin' : 'skins'}
+                  </p>
                 </div>
                 <WandSparkles className="size-4 text-primary" />
               </div>
-              {skins.map((skin) => (
-                <button
-                  key={skin.id}
-                  type="button"
-                  onClick={() => onSkinChange(skin.id)}
-                  className={cn(
-                    'flex w-full items-center gap-3 rounded-lg border border-border/70 bg-background/25 p-2.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/5',
-                    activeSkin === skin.id &&
-                      'border-primary/40 bg-primary/8 ring-1 ring-primary/15'
-                  )}
-                >
-                  <div
-                    className="grid size-9 place-items-center rounded-md border border-white/10"
-                    style={{
-                      background: `linear-gradient(135deg, ${skin.colors[0]}, ${skin.colors[1]})`
-                    }}
+              {skins.length > 0 ? (
+                skins.map((skin) => (
+                  <button
+                    key={skin.id}
+                    type="button"
+                    onClick={() => onSkinChange(skin.id)}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-lg border border-border/70 bg-background/25 p-2.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/5',
+                      activeSkin === skin.id &&
+                        'border-primary/40 bg-primary/8 ring-1 ring-primary/15'
+                    )}
                   >
-                    <Shirt className="size-4 text-white/90" />
+                    <div
+                      className="grid size-9 place-items-center rounded-md border border-white/10"
+                      style={{
+                        background: `linear-gradient(135deg, ${skin.accent}, #152329)`
+                      }}
+                    >
+                      <Shirt className="size-4 text-white/90" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium">{skin.name}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {skin.attachmentIds.length}{' '}
+                        {skin.attachmentIds.length === 1 ? 'attachment' : 'attachments'}
+                      </p>
+                    </div>
+                    {activeSkin === skin.id ? <CircleDot className="size-4 text-primary" /> : null}
+                  </button>
+                ))
+              ) : (
+                <div className="grid min-h-52 place-items-center px-4 text-center">
+                  <div>
+                    <div className="mx-auto mb-3 grid size-11 place-items-center rounded-xl border border-border/70 bg-muted/35 text-muted-foreground">
+                      <Shirt className="size-5" />
+                    </div>
+                    <p className="text-xs font-medium">No skins</p>
+                    <p className="mx-auto mt-1 max-w-48 text-[10px] leading-4 text-muted-foreground">
+                      This project does not contain any character variants.
+                    </p>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-medium">{skin.name}</p>
-                    <p className="text-[10px] text-muted-foreground">12 attachments</p>
-                  </div>
-                  {activeSkin === skin.id ? <CircleDot className="size-4 text-primary" /> : null}
-                </button>
-              ))}
+                </div>
+              )}
             </div>
           </ScrollArea>
         </TabsContent>
@@ -457,7 +813,8 @@ export function HierarchyPanel({
                       key={layer.id}
                       className={cn(
                         'group flex min-w-0 items-center rounded-md border border-transparent transition-colors hover:bg-accent/60',
-                        selectedId === layer.id && 'border-primary/25 bg-primary/10 text-primary'
+                        highlightedIds.has(layer.id) &&
+                          'border-primary/25 bg-primary/10 text-primary'
                       )}
                       style={{ paddingLeft: Math.min(layer.groupPath.length, 5) * 10 }}
                     >
@@ -501,7 +858,7 @@ export function HierarchyPanel({
               </div>
             ) : (
               <div className="grid min-h-64 place-items-center px-5 py-10 text-center">
-                <div>
+                <div className="flex flex-col gap-2 items-center">
                   <div className="mx-auto mb-3 grid size-11 place-items-center rounded-xl border border-border/70 bg-muted/35 text-muted-foreground">
                     <Layers3 className="size-5" />
                   </div>
@@ -531,9 +888,11 @@ export function HierarchyPanel({
           </>
         ) : (
           <>
-            <span>34 bones</span>
+            <span>{bones.length} bones</span>
             <span>·</span>
-            <span>18 slots</span>
+            <span>{slots.length} slots</span>
+            <span>·</span>
+            <span>{attachments.length} attachments</span>
           </>
         )}
         <Box className="ml-auto size-3" />

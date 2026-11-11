@@ -1,4 +1,4 @@
-import { stat, writeFile } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, extname } from 'node:path'
 
 import {
@@ -7,12 +7,16 @@ import {
   ipcMain,
   type FileFilter,
   type IpcMainInvokeEvent,
+  type OpenDialogOptions,
   type SaveDialogOptions,
   type WebContents
 } from 'electron'
 
 import {
   OUTPUT_IPC_CHANNELS,
+  type AcceptOpenProjectResult,
+  type OpenProjectResult,
+  type OutputErrorResult,
   type OutputFileKind,
   type OutputSaveResult,
   type SaveFileRequest,
@@ -51,13 +55,14 @@ const OUTPUT_SPECS: Record<OutputFileKind, OutputSpec> = {
 }
 
 const projectPaths = new Map<string, string>()
+const pendingProjectPaths = new Map<number, { projectId: string; filePath: string }>()
 const observedSenders = new Set<number>()
 
-function errorResult(message: string, code?: string): OutputSaveResult {
+function errorResult(message: string, code?: string): OutputErrorResult {
   return code ? { status: 'error', message, code } : { status: 'error', message }
 }
 
-function validateSender(event: IpcMainInvokeEvent): OutputSaveResult | null {
+function validateSender(event: IpcMainInvokeEvent): OutputErrorResult | null {
   if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame) {
     return errorResult('The output request did not come from the editor.', 'UNTRUSTED_SENDER')
   }
@@ -85,6 +90,7 @@ function observeSender(sender: WebContents): void {
 
   sender.once('destroyed', () => {
     observedSenders.delete(sender.id)
+    pendingProjectPaths.delete(sender.id)
     const prefix = `${sender.id}:`
     for (const key of projectPaths.keys()) {
       if (key.startsWith(prefix)) projectPaths.delete(key)
@@ -231,7 +237,7 @@ function validateContents(
   return null
 }
 
-function writeError(error: unknown): OutputSaveResult {
+function writeError(error: unknown): OutputErrorResult {
   const code = error instanceof Error && 'code' in error ? String(error.code) : undefined
 
   if (code === 'ENOSPC')
@@ -246,6 +252,20 @@ function writeError(error: unknown): OutputSaveResult {
     'The file could not be written. Choose another destination and try again.',
     code
   )
+}
+
+function readError(error: unknown): OutputErrorResult {
+  const code = error instanceof Error && 'code' in error ? String(error.code) : undefined
+
+  if (code === 'ENOENT') return errorResult('The selected project is no longer available.', code)
+  if (code === 'EACCES' || code === 'EPERM') {
+    return errorResult('The app does not have permission to read the selected project.', code)
+  }
+  if (code === 'EISDIR') {
+    return errorResult('The selected project is not a regular file.', 'INVALID_PROJECT_FILE')
+  }
+
+  return errorResult('The selected project could not be read.', code)
 }
 
 async function chooseDestination(
@@ -287,6 +307,122 @@ async function writeOutput(
   } catch (error) {
     return writeError(error)
   }
+}
+
+function projectIdFromContents(contents: string): string | OutputErrorResult {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(contents) as unknown
+  } catch {
+    return errorResult('The selected project is not valid JSON.', 'INVALID_PROJECT_FILE')
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return errorResult('The selected file is not a Layerforge project.', 'INVALID_PROJECT_FILE')
+  }
+
+  const document = parsed as Record<string, unknown>
+  if (document.format !== 'layerforge-project') {
+    return errorResult('The selected file is not a Layerforge project.', 'INVALID_PROJECT_FILE')
+  }
+  if (document.version !== 1) {
+    return errorResult(
+      'This project was created by an unsupported Layerforge version.',
+      'UNSUPPORTED_PROJECT_VERSION'
+    )
+  }
+  if (
+    !document.project ||
+    typeof document.project !== 'object' ||
+    Array.isArray(document.project)
+  ) {
+    return errorResult('The project data is missing or invalid.', 'INVALID_PROJECT')
+  }
+
+  const projectId = (document.project as Record<string, unknown>).id
+  if (typeof projectId !== 'string' || projectId.trim().length === 0 || projectId.length > 200) {
+    return errorResult('The project does not have a valid identifier.', 'INVALID_PROJECT')
+  }
+
+  return projectId
+}
+
+async function handleOpenProject(event: IpcMainInvokeEvent): Promise<OpenProjectResult> {
+  const senderError = validateSender(event)
+  if (senderError) return senderError
+  observeSender(event.sender)
+  pendingProjectPaths.delete(event.sender.id)
+
+  const options: OpenDialogOptions = {
+    title: 'Open project',
+    filters: PROJECT_SPEC.filters,
+    properties: ['openFile']
+  }
+  const owner = BrowserWindow.fromWebContents(event.sender)
+  const result = owner
+    ? await dialog.showOpenDialog(owner, options)
+    : await dialog.showOpenDialog(options)
+  const filePath = result.filePaths[0]
+  if (result.canceled || !filePath) return { status: 'cancelled' }
+
+  try {
+    const selectedFile = await stat(filePath)
+    if (!selectedFile.isFile()) {
+      return errorResult('The selected project is not a regular file.', 'INVALID_PROJECT_FILE')
+    }
+    if (selectedFile.size === 0) {
+      return errorResult('The selected project file is empty.', 'EMPTY_PROJECT')
+    }
+    if (selectedFile.size > PROJECT_SPEC.maxBytes) {
+      return errorResult(
+        `The selected project is too large to open safely (${Math.ceil(selectedFile.size / MEBIBYTE)} MiB).`,
+        'PROJECT_TOO_LARGE'
+      )
+    }
+
+    const contents = await readFile(filePath, 'utf8')
+    const size = Buffer.byteLength(contents, 'utf8')
+    if (size === 0) return errorResult('The selected project file is empty.', 'EMPTY_PROJECT')
+    if (size > PROJECT_SPEC.maxBytes) {
+      return errorResult(
+        `The selected project is too large to open safely (${Math.ceil(size / MEBIBYTE)} MiB).`,
+        'PROJECT_TOO_LARGE'
+      )
+    }
+
+    const projectId = projectIdFromContents(contents)
+    if (typeof projectId !== 'string') return projectId
+
+    pendingProjectPaths.set(event.sender.id, { projectId, filePath })
+    return { status: 'opened', filePath, contents }
+  } catch (error) {
+    return readError(error)
+  }
+}
+
+async function handleAcceptOpenProject(
+  event: IpcMainInvokeEvent,
+  projectId: string
+): Promise<AcceptOpenProjectResult> {
+  const senderError = validateSender(event)
+  if (senderError) return senderError
+  observeSender(event.sender)
+
+  const pending = pendingProjectPaths.get(event.sender.id)
+  if (!pending) {
+    return errorResult('There is no opened project waiting to be accepted.', 'NO_PENDING_PROJECT')
+  }
+  if (typeof projectId !== 'string' || projectId !== pending.projectId) {
+    pendingProjectPaths.delete(event.sender.id)
+    return errorResult(
+      'The opened project identifier did not match the validated project.',
+      'PROJECT_ID_MISMATCH'
+    )
+  }
+
+  pendingProjectPaths.delete(event.sender.id)
+  projectPaths.set(`${event.sender.id}:${projectId}`, pending.filePath)
+  return { status: 'accepted' }
 }
 
 async function handleSaveProject(
@@ -358,6 +494,8 @@ async function handleSaveFile(
 }
 
 export function registerOutputIpc(): void {
+  ipcMain.handle(OUTPUT_IPC_CHANNELS.openProject, handleOpenProject)
+  ipcMain.handle(OUTPUT_IPC_CHANNELS.acceptOpenProject, handleAcceptOpenProject)
   ipcMain.handle(OUTPUT_IPC_CHANNELS.saveProject, handleSaveProject)
   ipcMain.handle(OUTPUT_IPC_CHANNELS.saveFile, handleSaveFile)
 }
