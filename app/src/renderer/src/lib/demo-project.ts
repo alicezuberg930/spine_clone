@@ -402,7 +402,10 @@ const constraints: Constraint[] = [
     type: 'ik',
     boneIds: ['bone-arm-l', 'bone-forearm-l'],
     targetId: 'bone-hand-l',
-    mix: 1
+    mix: 1,
+    enabled: true,
+    targetPosition: { x: 298, y: 426 },
+    bendDirection: 1
   },
   {
     id: 'constraint-foot-ik',
@@ -410,7 +413,10 @@ const constraints: Constraint[] = [
     type: 'ik',
     boneIds: ['bone-thigh-r', 'bone-shin-r'],
     targetId: 'bone-foot-r',
-    mix: 1
+    mix: 1,
+    enabled: true,
+    targetPosition: { x: 476, y: 510 },
+    bendDirection: 1
   },
   {
     id: 'constraint-cape-physics',
@@ -418,6 +424,7 @@ const constraints: Constraint[] = [
     type: 'physics',
     boneIds: ['bone-cape'],
     mix: 0.82,
+    enabled: true,
     physics: { ...DEFAULT_PHYSICS }
   },
   {
@@ -426,7 +433,12 @@ const constraints: Constraint[] = [
     type: 'transform',
     boneIds: ['bone-head'],
     targetId: 'bone-chest',
-    mix: 0.35
+    mix: 0.35,
+    enabled: true,
+    offsetRotation: 12,
+    translateMix: 0,
+    rotateMix: 0.35,
+    scaleMix: 0
   },
   {
     id: 'constraint-scarf-path',
@@ -434,7 +446,17 @@ const constraints: Constraint[] = [
     type: 'path',
     boneIds: ['bone-cape'],
     targetId: 'attachment-scarf-path',
-    mix: 0.7
+    mix: 0.7,
+    enabled: true,
+    pathPosition: 0.55,
+    pathSpacing: 18,
+    pathRotate: true,
+    pathPoints: [
+      { x: 438, y: 270 },
+      { x: 482, y: 260 },
+      { x: 520, y: 325 },
+      { x: 565, y: 288 }
+    ]
   }
 ]
 
@@ -615,6 +637,7 @@ export const demoProject: EditorProject = {
   id: 'project-ember-scout',
   name: 'Ember Scout',
   skeletonName: 'scout_rig_v07',
+  canvas: { width: 800, height: 600 },
   bones,
   slots,
   attachments,
@@ -622,6 +645,7 @@ export const demoProject: EditorProject = {
   skins,
   animations,
   artwork: null,
+  audioTracks: [],
   updatedAt: '2026-11-10T09:40:00.000Z'
 }
 

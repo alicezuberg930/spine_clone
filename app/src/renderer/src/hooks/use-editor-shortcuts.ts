@@ -19,14 +19,15 @@ const toolShortcuts: Record<string, EditorTool> = {
   s: 'select',
   t: 'translate',
   r: 'rotate',
-  e: 'scale'
+  e: 'scale',
+  p: 'pose',
+  m: 'mesh',
+  d: 'deform',
+  w: 'weights',
+  c: 'clipping'
 }
 
 const unavailableToolShortcuts: Record<string, string> = {
-  p: 'Pose / IK tool',
-  m: 'Mesh editor',
-  w: 'Weight painting',
-  c: 'Clipping editor',
   b: 'Bounds editor'
 }
 

@@ -55,6 +55,17 @@ export interface Constraint {
   boneIds: string[]
   targetId?: string
   mix: number
+  enabled?: boolean
+  targetPosition?: Point
+  bendDirection?: 1 | -1
+  offsetRotation?: number
+  translateMix?: number
+  rotateMix?: number
+  scaleMix?: number
+  pathPosition?: number
+  pathSpacing?: number
+  pathRotate?: boolean
+  pathPoints?: [Point, Point, Point, Point]
   physics?: PhysicsParams
 }
 

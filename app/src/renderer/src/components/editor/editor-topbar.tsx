@@ -10,6 +10,11 @@ interface EditorTopbarProps {
   onModeChange: (mode: EditorMode) => void
   onNewProject: () => void
   onImportArtwork: () => void
+  onImportAudio: () => void
+  onSaveProject: () => void
+  onExportData: () => void
+  onExportImages: () => void
+  onExportVideo: () => void
   onFeatureNotImplemented: (feature: string) => void
   onInsertKey: () => void
   onResetDemo: () => void
@@ -27,6 +32,11 @@ export function EditorTopbar({
   onModeChange,
   onNewProject,
   onImportArtwork,
+  onImportAudio,
+  onSaveProject,
+  onExportData,
+  onExportImages,
+  onExportVideo,
   onFeatureNotImplemented,
   onInsertKey,
   onResetDemo,
@@ -38,6 +48,11 @@ export function EditorTopbar({
       <EditorMenubar
         onNewProject={onNewProject}
         onImportArtwork={onImportArtwork}
+        onImportAudio={onImportAudio}
+        onSaveProject={onSaveProject}
+        onExportData={onExportData}
+        onExportImages={onExportImages}
+        onExportVideo={onExportVideo}
         onFeatureNotImplemented={onFeatureNotImplemented}
         onInsertKey={onInsertKey}
         onResetDemo={onResetDemo}
@@ -73,7 +88,7 @@ export function EditorTopbar({
           variant="ghost"
           size="sm"
           className="h-7 gap-1.5 text-[10px] text-muted-foreground"
-          onClick={() => onFeatureNotImplemented('Save project')}
+          onClick={onSaveProject}
         >
           <Save /> <span className="hide-compact">Save</span>
         </Button>

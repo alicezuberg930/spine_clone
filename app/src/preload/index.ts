@@ -1,8 +1,18 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 import { electronAPI } from '@electron-toolkit/preload'
+import {
+  OUTPUT_IPC_CHANNELS,
+  type DesktopOutputApi,
+  type SaveFileRequest,
+  type SaveProjectRequest
+} from '../shared/output-api'
 
 // Custom APIs for renderer
-const api = {}
+const api: DesktopOutputApi = {
+  saveProject: (request: SaveProjectRequest) =>
+    ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.saveProject, request),
+  saveFile: (request: SaveFileRequest) => ipcRenderer.invoke(OUTPUT_IPC_CHANNELS.saveFile, request)
+}
 
 // Use `contextBridge` APIs to expose Electron APIs to
 // renderer only if context isolation is enabled, otherwise

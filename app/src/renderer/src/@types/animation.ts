@@ -1,6 +1,7 @@
 import type { Point, Transform } from './geometry'
+import type { MeshDeformValue } from './mesh'
 
-export type KeyframeValue = number | boolean | string | Point | Transform
+export type KeyframeValue = number | boolean | string | Point | Transform | MeshDeformValue
 export type KeyframeInterpolation = 'linear' | 'stepped' | 'bezier'
 
 export interface EditorKeyframe {

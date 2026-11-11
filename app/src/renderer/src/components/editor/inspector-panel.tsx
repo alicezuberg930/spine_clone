@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import {
+  AudioLines,
   BadgeCheck,
   Blend,
   Bone,
@@ -16,6 +17,7 @@ import {
   Sparkles,
   Spline,
   Target,
+  Trash2,
   Unlink,
   Waves,
   Weight
@@ -37,7 +39,17 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { ArtworkLayer, PhysicsParams, Transform } from '@/@types'
+import type {
+  ArtworkLayer,
+  AudioTrack,
+  Bone as BoneType,
+  Constraint,
+  EditorTool,
+  GeometrySelection,
+  PhysicsParams,
+  Transform,
+  WeightBrush
+} from '@/@types'
 
 interface InspectorFlags {
   showMesh: boolean
@@ -55,24 +67,73 @@ interface InspectorPanelProps {
   flags: InspectorFlags
   frame: number
   artworkLayer: ArtworkLayer | null
+  tool: EditorTool
+  bones: BoneType[]
+  geometrySelection: GeometrySelection | null
+  weightBrush: WeightBrush
+  selectedConstraint: Constraint | null
+  selectedAudioTrack: AudioTrack | null
   onTransformChange: (patch: Partial<Transform>) => void
   onPhysicsChange: (patch: Partial<PhysicsParams>) => void
   onPhysicsEnabledChange: (enabled: boolean) => void
   onToggle: (key: 'showMesh' | 'showWeights' | 'showClipping' | 'showBounds') => void
   onResetTransform: () => void
   onArtworkLayerVisibilityChange: (id: string) => void
+  onCreateArtworkMesh: (layerId: string, cells: number) => void
+  onResetArtworkDeformation: (layerId: string) => void
+  onWeightBrushChange: (changes: Partial<WeightBrush>) => void
+  onVertexWeightChange: (layerId: string, vertexId: string, boneId: string, value: number) => void
+  onCreateArtworkClipping: (layerId: string) => void
+  onArtworkClippingChange: (
+    layerId: string,
+    changes: Partial<NonNullable<ArtworkLayer['clipping']>>
+  ) => void
+  onConstraintChange: (id: string, patch: Partial<Constraint>) => void
+  onConstraintSelect: (id: string) => void
+  onAudioTrackChange: (id: string, changes: Partial<AudioTrack>) => void
+  onAudioTrackRemove: (id: string) => void
   onFeatureNotImplemented: (feature: string) => void
 }
 
 function ArtworkLayerInspector({
   layer,
+  tool,
+  bones,
+  geometrySelection,
+  weightBrush,
   onVisibilityChange,
+  onCreateMesh,
+  onResetDeformation,
+  onWeightBrushChange,
+  onVertexWeightChange,
+  onCreateClipping,
+  onClippingChange,
   onFeatureNotImplemented
 }: {
   layer: ArtworkLayer
+  tool: EditorTool
+  bones: BoneType[]
+  geometrySelection: GeometrySelection | null
+  weightBrush: WeightBrush
   onVisibilityChange: (id: string) => void
+  onCreateMesh: (layerId: string, cells: number) => void
+  onResetDeformation: (layerId: string) => void
+  onWeightBrushChange: (changes: Partial<WeightBrush>) => void
+  onVertexWeightChange: (layerId: string, vertexId: string, boneId: string, value: number) => void
+  onCreateClipping: (layerId: string) => void
+  onClippingChange: (
+    layerId: string,
+    changes: Partial<NonNullable<ArtworkLayer['clipping']>>
+  ) => void
   onFeatureNotImplemented: (feature: string) => void
 }): React.JSX.Element {
+  const selectedVertexId =
+    geometrySelection?.layerId === layer.id && geometrySelection.kind === 'mesh'
+      ? geometrySelection.vertexIds[0]
+      : null
+  const selectedVertex = layer.mesh?.vertices.find((vertex) => vertex.id === selectedVertexId)
+  const activeWeight =
+    selectedVertex?.weights.find((weight) => weight.boneId === weightBrush.boneId)?.value ?? 0
   return (
     <section className="panel-sheen flex h-full min-h-0 flex-col">
       <PanelHeader
@@ -149,11 +210,140 @@ function ArtworkLayerInspector({
             ))}
           </div>
 
+          <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+            <div className="flex items-center gap-2">
+              <Spline className="size-4 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="text-[11px] font-medium">Geometry</p>
+                <p className="text-[9px] capitalize text-muted-foreground">{tool} workflow</p>
+              </div>
+              {layer.mesh ? (
+                <Badge variant="outline" className="h-5 text-[8px]">
+                  {layer.mesh.vertices.length} vertices
+                </Badge>
+              ) : null}
+            </div>
+
+            {layer.mesh ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Button size="sm" variant="outline" onClick={() => onCreateMesh(layer.id, 2)}>
+                  Reset mesh
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => onCreateMesh(layer.id, 4)}>
+                  Subdivide
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="col-span-2"
+                  onClick={() => onResetDeformation(layer.id)}
+                >
+                  <RefreshCw /> Reset deformation
+                </Button>
+              </div>
+            ) : (
+              <Button size="sm" className="w-full" onClick={() => onCreateMesh(layer.id, 2)}>
+                <Spline /> Create 3 × 3 mesh
+              </Button>
+            )}
+
+            {layer.mesh ? (
+              <div className="space-y-2 border-t border-border/60 pt-3">
+                <div className="grid grid-cols-[58px_1fr] items-center gap-2">
+                  <Label className="text-[10px] font-normal text-muted-foreground">Bone</Label>
+                  <NativeSelect
+                    size="sm"
+                    value={weightBrush.boneId ?? ''}
+                    onChange={(event) => onWeightBrushChange({ boneId: event.target.value })}
+                  >
+                    {bones.map((bone) => (
+                      <NativeSelectOption key={bone.id} value={bone.id}>
+                        {bone.name}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <PhysicsSlider
+                  label="Radius"
+                  value={weightBrush.radius}
+                  max={250}
+                  onChange={(radius) => onWeightBrushChange({ radius })}
+                />
+                <PhysicsSlider
+                  label="Strength"
+                  value={Math.round(weightBrush.strength * 100)}
+                  onChange={(strength) => onWeightBrushChange({ strength: strength / 100 })}
+                />
+                {selectedVertex && weightBrush.boneId ? (
+                  <div className="rounded-md border border-border/60 bg-background/35 p-2">
+                    <div className="mb-1.5 flex items-center justify-between text-[9px]">
+                      <span className="text-muted-foreground">Selected vertex influence</span>
+                      <span>{Math.round(activeWeight * 100)}%</span>
+                    </div>
+                    <Slider
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={[activeWeight]}
+                      onValueChange={(value) =>
+                        onVertexWeightChange(
+                          layer.id,
+                          selectedVertex.id,
+                          weightBrush.boneId!,
+                          value[0] ?? 0
+                        )
+                      }
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="space-y-2 border-t border-border/60 pt-3">
+              {layer.clipping ? (
+                <>
+                  <ToggleRow
+                    icon={Crop}
+                    title="Clipping enabled"
+                    description="Restrict this layer to the editable polygon"
+                    checked={layer.clipping.enabled}
+                    onCheckedChange={(enabled) => onClippingChange(layer.id, { enabled })}
+                  />
+                  <ToggleRow
+                    icon={Crop}
+                    title="Inverse clipping"
+                    description="Cut the polygon out instead of keeping it"
+                    checked={layer.clipping.inverted}
+                    onCheckedChange={(inverted) => onClippingChange(layer.id, { inverted })}
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full"
+                    onClick={() => onCreateClipping(layer.id)}
+                  >
+                    Reset clipping polygon
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => onCreateClipping(layer.id)}
+                >
+                  <Crop />
+                  Create clipping polygon
+                </Button>
+              )}
+            </div>
+          </div>
+
           <div className="rounded-lg border border-border/70 bg-background/25 p-3">
             <div className="mb-1.5 flex items-center gap-2 text-[11px] font-medium">
               <ImageIcon className="size-3.5 text-primary" /> Layer path
             </div>
-            <p className="break-words text-[10px] leading-4 text-muted-foreground">
+            <p className="wrap-break-word text-[10px] leading-4 text-muted-foreground">
               {layer.groupPath.length > 0
                 ? `${layer.groupPath.join(' / ')} / ${layer.name}`
                 : layer.name}
@@ -255,6 +445,242 @@ function PhysicsSlider({
   )
 }
 
+function ConstraintInspector({
+  constraint,
+  onChange
+}: {
+  constraint: Constraint
+  onChange: (patch: Partial<Constraint>) => void
+}): React.JSX.Element {
+  const typeLabel =
+    constraint.type === 'ik'
+      ? 'Inverse kinematics'
+      : constraint.type === 'transform'
+        ? 'Transform mapping'
+        : constraint.type === 'path'
+          ? 'Bezier path following'
+          : 'Dynamic constraint'
+
+  return (
+    <section className="panel-sheen flex h-full min-h-0 flex-col">
+      <PanelHeader title="Constraint" eyebrow={constraint.type} />
+      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border/70 px-3">
+        <div className="grid size-9 place-items-center rounded-lg border border-primary/20 bg-primary/10">
+          {constraint.type === 'ik' ? (
+            <Target className="size-4 text-[#86a9ff]" />
+          ) : constraint.type === 'transform' ? (
+            <GitBranch className="size-4 text-[#f4b85a]" />
+          ) : (
+            <Spline className="size-4 text-[#d987e6]" />
+          )}
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">{constraint.name}</p>
+          <p className="truncate text-[9px] text-muted-foreground">{typeLabel}</p>
+        </div>
+        <Switch
+          size="sm"
+          checked={constraint.enabled !== false}
+          onCheckedChange={(enabled) => onChange({ enabled })}
+        />
+      </div>
+
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-4 p-3">
+          <div className="rounded-lg border border-border/70 bg-background/25 p-3">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[11px] font-medium">Constraint mix</p>
+              <span className="text-[10px] tabular-nums text-muted-foreground">
+                {Math.round(constraint.mix * 100)}%
+              </span>
+            </div>
+            <Slider
+              min={0}
+              max={1}
+              step={0.01}
+              value={[constraint.mix]}
+              onValueChange={(value) => onChange({ mix: value[0] ?? constraint.mix })}
+            />
+          </div>
+
+          {constraint.type === 'ik' ? (
+            <div className="space-y-3 rounded-lg border border-[#86a9ff]/25 bg-[#86a9ff]/5 p-3">
+              <div>
+                <p className="text-[11px] font-medium">Target position</p>
+                <p className="mt-0.5 text-[9px] text-muted-foreground">
+                  Drag the target with the Pose tool or enter exact coordinates.
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <NumberField
+                  label="X"
+                  value={constraint.targetPosition?.x ?? 476}
+                  onChange={(x) =>
+                    onChange({ targetPosition: { x, y: constraint.targetPosition?.y ?? 510 } })
+                  }
+                />
+                <NumberField
+                  label="Y"
+                  value={constraint.targetPosition?.y ?? 510}
+                  onChange={(y) =>
+                    onChange({ targetPosition: { x: constraint.targetPosition?.x ?? 476, y } })
+                  }
+                />
+              </div>
+              <div className="grid grid-cols-[70px_1fr] items-center gap-2">
+                <Label className="text-[10px] font-normal text-muted-foreground">Bend</Label>
+                <NativeSelect
+                  size="sm"
+                  value={String(constraint.bendDirection ?? 1)}
+                  onChange={(event) =>
+                    onChange({ bendDirection: Number(event.target.value) as 1 | -1 })
+                  }
+                >
+                  <NativeSelectOption value="1">Clockwise</NativeSelectOption>
+                  <NativeSelectOption value="-1">Counter-clockwise</NativeSelectOption>
+                </NativeSelect>
+              </div>
+            </div>
+          ) : null}
+
+          {constraint.type === 'transform' ? (
+            <div className="space-y-3 rounded-lg border border-[#f4b85a]/25 bg-[#f4b85a]/5 p-3">
+              <NumberField
+                label="Offset"
+                value={constraint.offsetRotation ?? 0}
+                suffix="°"
+                onChange={(offsetRotation) => onChange({ offsetRotation })}
+              />
+              <PhysicsSlider
+                label="Rotate"
+                value={Math.round((constraint.rotateMix ?? constraint.mix) * 100)}
+                onChange={(value) => onChange({ rotateMix: value / 100 })}
+              />
+              <PhysicsSlider
+                label="Move"
+                value={Math.round((constraint.translateMix ?? 0) * 100)}
+                onChange={(value) => onChange({ translateMix: value / 100 })}
+              />
+              <PhysicsSlider
+                label="Scale"
+                value={Math.round((constraint.scaleMix ?? 0) * 100)}
+                onChange={(value) => onChange({ scaleMix: value / 100 })}
+              />
+            </div>
+          ) : null}
+
+          {constraint.type === 'path' ? (
+            <div className="space-y-3 rounded-lg border border-[#d987e6]/25 bg-[#d987e6]/5 p-3">
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <Label className="text-[10px] font-normal text-muted-foreground">Position</Label>
+                  <span className="text-[10px] tabular-nums">
+                    {Math.round((constraint.pathPosition ?? 0) * 100)}%
+                  </span>
+                </div>
+                <Slider
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={[constraint.pathPosition ?? 0]}
+                  onValueChange={(value) => onChange({ pathPosition: value[0] ?? 0 })}
+                />
+              </div>
+              <NumberField
+                label="Spacing"
+                value={constraint.pathSpacing ?? 0}
+                suffix="px"
+                onChange={(pathSpacing) => onChange({ pathSpacing })}
+              />
+              <ToggleRow
+                icon={Spline}
+                title="Follow tangent"
+                description="Rotate constrained bones along the curve"
+                checked={constraint.pathRotate !== false}
+                onCheckedChange={(pathRotate) => onChange({ pathRotate })}
+              />
+            </div>
+          ) : null}
+
+          <div className="rounded-lg border border-border/70 bg-background/25 p-3 text-[10px] text-muted-foreground">
+            Drives {constraint.boneIds.length} bone{constraint.boneIds.length === 1 ? '' : 's'}
+            {constraint.targetId ? ` from ${constraint.targetId}` : ''}.
+          </div>
+        </div>
+      </ScrollArea>
+    </section>
+  )
+}
+
+function AudioTrackInspector({
+  track,
+  onChange,
+  onRemove
+}: {
+  track: AudioTrack
+  onChange: (changes: Partial<AudioTrack>) => void
+  onRemove: () => void
+}): React.JSX.Element {
+  return (
+    <section className="panel-sheen flex h-full min-h-0 flex-col">
+      <PanelHeader title="Audio" eyebrow="timeline clip" />
+      <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border/70 px-3">
+        <div className="grid size-9 place-items-center rounded-lg border border-primary/20 bg-primary/10">
+          <AudioLines className="size-4 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold">{track.name}</p>
+          <p className="truncate text-[9px] text-muted-foreground">{track.sourceFileName}</p>
+        </div>
+        <Button variant="ghost" size="icon-xs" aria-label="Remove audio" onClick={onRemove}>
+          <Trash2 />
+        </Button>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-4 p-3">
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              ['Duration', `${track.durationSeconds.toFixed(2)} s`],
+              ['Sample rate', `${(track.sampleRate / 1000).toFixed(1)} kHz`],
+              ['Channels', track.channels === 1 ? 'Mono' : `${track.channels} channels`],
+              ['Start frame', String(track.startFrame)]
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                className="rounded-lg border border-border/70 bg-background/25 p-2.5"
+              >
+                <p className="text-[9px] uppercase tracking-wide text-muted-foreground">{label}</p>
+                <p className="mt-1 text-[11px] font-medium">{value}</p>
+              </div>
+            ))}
+          </div>
+          <div className="rounded-lg border border-border/70 bg-background/25 p-3">
+            <PhysicsSlider
+              label="Volume"
+              value={Math.round(track.volume * 100)}
+              onChange={(volume) => onChange({ volume: volume / 100 })}
+            />
+            <NumberField
+              label="Start"
+              value={track.startFrame}
+              onChange={(startFrame) =>
+                onChange({ startFrame: Math.max(0, Math.round(startFrame)) })
+              }
+            />
+            <ToggleRow
+              icon={AudioLines}
+              title="Muted"
+              description="Keep the clip on the timeline without playback"
+              checked={track.muted}
+              onCheckedChange={(muted) => onChange({ muted })}
+            />
+          </div>
+        </div>
+      </ScrollArea>
+    </section>
+  )
+}
+
 export function InspectorPanel({
   selectedId,
   selectedName,
@@ -263,12 +689,28 @@ export function InspectorPanel({
   flags,
   frame,
   artworkLayer,
+  tool,
+  bones,
+  geometrySelection,
+  weightBrush,
+  selectedConstraint,
+  selectedAudioTrack,
   onTransformChange,
   onPhysicsChange,
   onPhysicsEnabledChange,
   onToggle,
   onResetTransform,
   onArtworkLayerVisibilityChange,
+  onCreateArtworkMesh,
+  onResetArtworkDeformation,
+  onWeightBrushChange,
+  onVertexWeightChange,
+  onCreateArtworkClipping,
+  onArtworkClippingChange,
+  onConstraintChange,
+  onConstraintSelect,
+  onAudioTrackChange,
+  onAudioTrackRemove,
   onFeatureNotImplemented
 }: InspectorPanelProps): React.JSX.Element {
   const [compensation, setCompensation] = useState(true)
@@ -277,8 +719,37 @@ export function InspectorPanel({
     return (
       <ArtworkLayerInspector
         layer={artworkLayer}
+        tool={tool}
+        bones={bones}
+        geometrySelection={geometrySelection}
+        weightBrush={weightBrush}
         onVisibilityChange={onArtworkLayerVisibilityChange}
+        onCreateMesh={onCreateArtworkMesh}
+        onResetDeformation={onResetArtworkDeformation}
+        onWeightBrushChange={onWeightBrushChange}
+        onVertexWeightChange={onVertexWeightChange}
+        onCreateClipping={onCreateArtworkClipping}
+        onClippingChange={onArtworkClippingChange}
         onFeatureNotImplemented={onFeatureNotImplemented}
+      />
+    )
+  }
+
+  if (selectedConstraint && selectedConstraint.type !== 'physics') {
+    return (
+      <ConstraintInspector
+        constraint={selectedConstraint}
+        onChange={(patch) => onConstraintChange(selectedConstraint.id, patch)}
+      />
+    )
+  }
+
+  if (selectedAudioTrack) {
+    return (
+      <AudioTrackInspector
+        track={selectedAudioTrack}
+        onChange={(changes) => onAudioTrackChange(selectedAudioTrack.id, changes)}
+        onRemove={() => onAudioTrackRemove(selectedAudioTrack.id)}
       />
     )
   }
@@ -547,18 +1018,28 @@ export function InspectorPanel({
 
               {[
                 {
+                  id: 'constraint-hand-ik',
+                  icon: Target,
+                  title: 'IK · hand aim',
+                  meta: '2 bones · mix 100%',
+                  color: 'text-[#86a9ff]'
+                },
+                {
+                  id: 'constraint-foot-ik',
                   icon: Target,
                   title: 'IK · grounded foot',
                   meta: '2 bones · mix 100%',
                   color: 'text-[#86a9ff]'
                 },
                 {
+                  id: 'constraint-gaze',
                   icon: GitBranch,
                   title: 'Transform · gaze driver',
                   meta: 'Rotation → rotation · 35%',
                   color: 'text-[#f4b85a]'
                 },
                 {
+                  id: 'constraint-scarf-path',
                   icon: Spline,
                   title: 'Path · scarf flow',
                   meta: 'Bezier · tangent · 70%',
@@ -568,7 +1049,7 @@ export function InspectorPanel({
                 <button
                   key={constraint.title}
                   type="button"
-                  onClick={() => onFeatureNotImplemented(constraint.title)}
+                  onClick={() => onConstraintSelect(constraint.id)}
                   className="flex w-full items-center gap-2 rounded-lg border border-border/70 bg-background/25 p-2.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/5"
                 >
                   <constraint.icon className={`size-4 ${constraint.color}`} />

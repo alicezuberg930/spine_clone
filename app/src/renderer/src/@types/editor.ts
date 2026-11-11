@@ -1,12 +1,22 @@
 import type { EditorKeyframe } from './animation'
 import type { Transform } from './geometry'
+import type { GeometrySelection, WeightBrush } from './mesh'
 import type { EditorProject } from './project'
 import type { PhysicsParams } from './rig'
 
 export type EditorMode = 'setup' | 'animate'
 
 export type EditorTool =
-  'select' | 'translate' | 'rotate' | 'scale' | 'pose' | 'mesh' | 'weights' | 'clipping' | 'bounds'
+  | 'select'
+  | 'translate'
+  | 'rotate'
+  | 'scale'
+  | 'pose'
+  | 'mesh'
+  | 'deform'
+  | 'weights'
+  | 'clipping'
+  | 'bounds'
 
 export type TimelineView = 'dopesheet' | 'graph' | 'audio'
 
@@ -20,6 +30,7 @@ export type SelectionKind =
   | 'animation'
   | 'skin'
   | 'artwork-layer'
+  | 'audio'
 
 export interface EditorSelection {
   kind: SelectionKind
@@ -53,6 +64,8 @@ export interface EditorState {
   timelineView: TimelineView
   activeSkin: string
   activeAnimation: string
+  geometrySelection: GeometrySelection | null
+  weightBrush: WeightBrush
   transform: Transform
   physics: PhysicsParams
   keyframes: EditorKeyframe[]

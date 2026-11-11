@@ -14,6 +14,8 @@ import {
   SkipBack,
   SkipForward,
   Sparkles,
+  Trash2,
+  Upload,
   Volume2,
   VolumeX
 } from 'lucide-react'
@@ -26,7 +28,7 @@ import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import type { Animation, EditorKeyframe, TimelineView } from '@/@types'
+import type { Animation, AudioTrack, EditorKeyframe, TimelineView } from '@/@types'
 import { cn } from '@/lib/utils'
 
 interface TimelinePanelProps {
@@ -39,6 +41,8 @@ interface TimelinePanelProps {
   autoKey: boolean
   ghosting: boolean
   audioEnabled: boolean
+  audioTracks: AudioTrack[]
+  selectedAudioTrackId: string | null
   activeAnimation: string
   animations: Animation[]
   keyframes: EditorKeyframe[]
@@ -49,6 +53,10 @@ interface TimelinePanelProps {
   onAutoKeyChange: (autoKey: boolean) => void
   onGhostingChange: (ghosting: boolean) => void
   onAudioEnabledChange: (enabled: boolean) => void
+  onAudioTrackSelect: (id: string) => void
+  onAudioTrackChange: (id: string, changes: Partial<AudioTrack>) => void
+  onAudioRemove: (id: string) => void
+  onImportAudio: () => void
   onAnimationChange: (animation: string) => void
   onInsertKey: () => void
 }
@@ -58,7 +66,7 @@ const trackLabels = [
   { id: 'bone-torso', name: 'torso · rotation', color: '#45d6bd' },
   { id: 'bone-head', name: 'head · rotation', color: '#f4b85a' },
   { id: 'bone-arm-l', name: 'arm L · rotation', color: '#ff8f9c' },
-  { id: 'bone-cape', name: 'scarf · deform', color: '#d987e6' },
+  { id: 'mesh-deform', name: 'mesh · deform', color: '#d987e6' },
   { id: 'event-footstep', name: 'events · footsteps', color: '#ff786f' }
 ]
 
@@ -165,7 +173,8 @@ function Dopesheet({
                     )
                   if (row === 2) return keyframe.targetId.includes('head')
                   if (row === 3) return keyframe.targetId.includes('arm')
-                  if (row === 4) return keyframe.targetId.includes('cape')
+                  if (row === 4)
+                    return keyframe.targetId.includes('cape') || keyframe.property === 'deform'
                   return false
                 })
                 .map((keyframe) => (
@@ -284,43 +293,160 @@ function GraphEditor({
 }
 
 function AudioTimeline({
+  tracks,
+  selectedTrackId,
   enabled,
-  onEnabledChange
+  frame,
+  fps,
+  duration,
+  onEnabledChange,
+  onTrackSelect,
+  onTrackChange,
+  onRemove,
+  onImport
 }: {
+  tracks: AudioTrack[]
+  selectedTrackId: string | null
   enabled: boolean
+  frame: number
+  fps: number
+  duration: number
   onEnabledChange: (enabled: boolean) => void
+  onTrackSelect: (id: string) => void
+  onTrackChange: (id: string, changes: Partial<AudioTrack>) => void
+  onRemove: (id: string) => void
+  onImport: () => void
 }): React.JSX.Element {
-  const bars = useMemo(
-    () =>
-      Array.from(
-        { length: 96 },
-        (_, index) => 8 + Math.abs(Math.sin(index * 0.67) * 46 + Math.cos(index * 0.21) * 24)
-      ),
-    []
-  )
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-[#0c151a]">
-      <div className="flex h-8 items-center gap-2 border-b border-border/70 px-3">
-        {enabled ? (
-          <Volume2 className="size-3.5 text-primary" />
-        ) : (
-          <VolumeX className="size-3.5 text-muted-foreground" />
-        )}
-        <span className="text-[10px] font-medium">forest-loop.ogg</span>
-        <span className="text-[9px] text-muted-foreground">48 kHz · stereo</span>
-        <Switch size="sm" checked={enabled} onCheckedChange={onEnabledChange} className="ml-auto" />
+  const track = tracks.find((candidate) => candidate.id === selectedTrackId) ?? tracks[0] ?? null
+
+  if (!track) {
+    return (
+      <div className="grid h-full place-items-center bg-[#0c151a] text-center">
+        <div className="flex flex-col items-center gap-2">
+          <VolumeX className="mx-auto mb-2 size-6 text-muted-foreground" />
+          <p className="text-xs font-medium">No audio clip</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Import MP3, OGG, or WAV for synchronized playback.
+          </p>
+          <Button size="sm" className="mt-3" onClick={onImport}>
+            <Upload /> Import audio
+          </Button>
+        </div>
       </div>
-      <div className="flex min-h-0 flex-1 items-center gap-[2px] overflow-hidden px-3">
-        {bars.map((height, index) => (
+    )
+  }
+  const bars = track.waveform
+  const clipFrames = Math.max(1, Math.round(track.durationSeconds * fps))
+  const clipWidth = Math.min(100, (clipFrames / Math.max(1, duration)) * 100)
+  const clipLeft = Math.min(100, (track.startFrame / Math.max(1, duration)) * 100)
+  return (
+    <div className="flex h-full min-h-0 bg-[#0c151a]">
+      <div className="flex w-48 shrink-0 flex-col border-r border-border/70 bg-[#101920]">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/70 px-2">
+          <span className="text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
+            Audio tracks
+          </span>
+          <Badge variant="outline" className="h-4 px-1 text-[8px]">
+            {tracks.length}
+          </Badge>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Import another audio track"
+            className="ml-auto"
+            onClick={onImport}
+          >
+            <Plus />
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-1">
+          {tracks.map((candidate) => {
+            const selected = candidate.id === track.id
+            return (
+              <div
+                key={candidate.id}
+                className={cn(
+                  'group flex h-8 items-center gap-1 rounded-md px-1',
+                  selected ? 'bg-primary/10 text-primary' : 'text-foreground/75 hover:bg-accent/55'
+                )}
+              >
+                <button
+                  type="button"
+                  className="min-w-0 flex-1 truncate px-1 text-left text-[10px]"
+                  onClick={() => onTrackSelect(candidate.id)}
+                >
+                  {candidate.name}
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`${candidate.muted ? 'Unmute' : 'Mute'} ${candidate.name}`}
+                  onClick={() => onTrackChange(candidate.id, { muted: !candidate.muted })}
+                >
+                  {candidate.muted ? <VolumeX /> : <Volume2 />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`Remove ${candidate.name}`}
+                  onClick={() => onRemove(candidate.id)}
+                  className="opacity-60 group-hover:opacity-100"
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+          {!enabled || track.muted ? (
+            <VolumeX className="size-3.5 text-muted-foreground" />
+          ) : (
+            <Volume2 className="size-3.5 text-primary" />
+          )}
+          <span className="max-w-48 truncate text-[10px] font-medium">{track.name}</span>
+          <span className="text-[9px] text-muted-foreground">
+            {(track.sampleRate / 1000).toFixed(1)} kHz · {track.channels === 1 ? 'mono' : 'stereo'}{' '}
+            · frame {track.startFrame}
+          </span>
+          <span className="ml-auto text-[9px] text-muted-foreground">Preview mix</span>
+          <Switch size="sm" checked={enabled} onCheckedChange={onEnabledChange} />
+        </div>
+        <div className="relative flex min-h-0 flex-1 items-center gap-[2px] overflow-hidden px-3">
           <span
-            key={index}
-            className={cn(
-              'min-w-[2px] flex-1 rounded-full',
-              enabled ? 'bg-primary/65' : 'bg-muted-foreground/25'
-            )}
-            style={{ height: `${Math.min(82, height)}%` }}
+            className="pointer-events-none absolute bottom-2 top-2 rounded border border-primary/20 bg-primary/5"
+            style={{ left: `${clipLeft}%`, width: `${clipWidth}%` }}
           />
-        ))}
+          {bars.map((height, index) => (
+            <span
+              key={index}
+              className={cn(
+                'min-w-[2px] flex-1 rounded-full',
+                enabled && !track.muted ? 'bg-primary/65' : 'bg-muted-foreground/25'
+              )}
+              style={{ height: `${Math.max(3, Math.min(82, height * 82))}%` }}
+            />
+          ))}
+          <span
+            className="pointer-events-none absolute bottom-0 top-0 z-10 w-px bg-primary"
+            style={{ left: `${(frame / Math.max(1, duration)) * 100}%` }}
+          />
+          <label className="absolute bottom-1 right-3 z-20 flex items-center gap-2 text-[9px] text-muted-foreground">
+            Volume {Math.round(track.volume * 100)}%
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={track.volume}
+              onChange={(event) => onTrackChange(track.id, { volume: Number(event.target.value) })}
+              className="h-1 w-20 accent-primary"
+            />
+          </label>
+        </div>
       </div>
     </div>
   )
@@ -336,6 +462,8 @@ export function TimelinePanel({
   autoKey,
   ghosting,
   audioEnabled,
+  audioTracks,
+  selectedAudioTrackId,
   activeAnimation,
   animations,
   keyframes,
@@ -346,6 +474,10 @@ export function TimelinePanel({
   onAutoKeyChange,
   onGhostingChange,
   onAudioEnabledChange,
+  onAudioTrackSelect,
+  onAudioTrackChange,
+  onAudioRemove,
+  onImportAudio,
   onAnimationChange,
   onInsertKey
 }: TimelinePanelProps): React.JSX.Element {
@@ -468,7 +600,19 @@ export function TimelinePanel({
           <GraphEditor frame={frame} duration={duration} onFrameChange={onFrameChange} />
         ) : null}
         {view === 'audio' ? (
-          <AudioTimeline enabled={audioEnabled} onEnabledChange={onAudioEnabledChange} />
+          <AudioTimeline
+            tracks={audioTracks}
+            selectedTrackId={selectedAudioTrackId}
+            enabled={audioEnabled}
+            frame={frame}
+            fps={fps}
+            duration={duration}
+            onEnabledChange={onAudioEnabledChange}
+            onTrackSelect={onAudioTrackSelect}
+            onTrackChange={onAudioTrackChange}
+            onRemove={onAudioRemove}
+            onImport={onImportAudio}
+          />
         ) : null}
       </div>
 

@@ -1,3 +1,5 @@
+import type { ArtworkClipping, ArtworkMesh } from './mesh'
+
 export type ArtworkSourceType = 'psd' | 'images'
 
 export interface ArtworkLayer {
@@ -14,6 +16,8 @@ export interface ArtworkLayer {
   blendMode: string
   order: number
   sourceFileName: string
+  mesh?: ArtworkMesh
+  clipping?: ArtworkClipping
 }
 
 export interface ArtworkDocument {

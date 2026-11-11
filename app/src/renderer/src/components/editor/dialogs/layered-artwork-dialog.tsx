@@ -141,24 +141,16 @@ export function LayeredArtworkDialog({
       >
         <div className="border-b border-border/70 bg-gradient-to-r from-primary/10 to-transparent px-6 py-5">
           <DialogHeader className="text-left">
-            <div className="flex items-center gap-3">
-              <div>
-                <DialogTitle className="text-base font-semibold">
-                  Import layered artwork
-                </DialogTitle>
-                <DialogDescription className="mt-1">
-                  Import one PSD or stack multiple image files as layers.
-                </DialogDescription>
-              </div>
-            </div>
+            <DialogTitle className="text-base font-semibold">
+              Import layered artwork
+            </DialogTitle>
+            <DialogDescription className="mt-1">
+              Import one PSD or stack multiple image files as layers.
+            </DialogDescription>
           </DialogHeader>
         </div>
 
         <form onSubmit={handleSubmit} className="grid gap-4 px-6 pb-5">
-          <p className="rounded-lg border border-border/70 bg-muted/25 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            A successful import replaces the artwork currently displayed in the workspace.
-          </p>
-
           <label
             htmlFor={inputId}
             onDragEnter={(event) => {

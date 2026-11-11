@@ -30,13 +30,23 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { ArtworkDocument, ArtworkLayer } from '@/@types'
+import type {
+  ArtworkDocument,
+  ArtworkLayer,
+  AudioTrack,
+  Bone as BoneType,
+  Constraint
+} from '@/@types'
+import { createConstraintTreeNodes } from '@/lib/hierarchy-model'
 import { cn } from '@/lib/utils'
 
 interface HierarchyPanelProps {
   selectedId: string
   onSelect: (id: string) => void
   artwork: ArtworkDocument | null
+  audioTracks: AudioTrack[]
+  bones: BoneType[]
+  constraints: Constraint[]
   onArtworkLayerSelect: (id: string) => void
   onArtworkLayerVisibilityChange: (id: string) => void
   onImportArtwork: () => void
@@ -84,10 +94,6 @@ const nodes: TreeNode[] = [
   { id: 'slot-head', name: 'face / blink', type: 'slot', depth: 2 },
   { id: 'slot-torso', name: 'jacket / moss', type: 'slot', depth: 2 },
   { id: 'attachment-cape', name: 'scarf · weighted', type: 'mesh', depth: 2 },
-  { id: 'constraints', name: 'Constraints', type: 'constraint', depth: 1, open: true },
-  { id: 'constraint-foot-ik', name: 'IK · grounded foot', type: 'constraint', depth: 2 },
-  { id: 'constraint-scarf-path', name: 'Path · scarf flow', type: 'constraint', depth: 2 },
-  { id: 'constraint-cape-physics', name: 'Physics · hair tips', type: 'constraint', depth: 2 },
   { id: 'attachment-hurtbox', name: 'Bounds · body hitbox', type: 'bounds', depth: 1 },
   { id: 'audio', name: 'Audio · forest-loop.ogg', type: 'audio', depth: 1 }
 ]
@@ -185,6 +191,9 @@ export function HierarchyPanel({
   selectedId,
   onSelect,
   artwork,
+  audioTracks,
+  bones,
+  constraints,
   onArtworkLayerSelect,
   onArtworkLayerVisibilityChange,
   onImportArtwork,
@@ -199,8 +208,16 @@ export function HierarchyPanel({
   )
   const filteredDemoNodes = useMemo(() => {
     const query = filter.trim().toLowerCase()
-    return query ? nodes.filter((node) => node.name.toLowerCase().includes(query)) : nodes
-  }, [filter])
+    const projectNodes: TreeNode[] = [
+      ...nodes.filter((node) => node.type !== 'audio' && node.id !== 'attachment-hurtbox'),
+      { id: 'constraints', name: 'Constraints', type: 'constraint', depth: 1, open: true },
+      ...createConstraintTreeNodes(constraints),
+      ...nodes.filter((node) => node.id === 'attachment-hurtbox')
+    ]
+    return query
+      ? projectNodes.filter((node) => node.name.toLowerCase().includes(query))
+      : projectNodes
+  }, [constraints, filter])
 
   return (
     <section className="panel-sheen flex h-full min-h-0 flex-col">
@@ -333,6 +350,42 @@ export function HierarchyPanel({
                 ))}
               </div>
             )}
+            {audioTracks.map((track) => (
+              <button
+                key={track.id}
+                type="button"
+                onClick={() => onSelect(track.id)}
+                className={cn(
+                  'mt-1 flex h-8 w-full items-center gap-2 rounded-md px-3 text-left text-[11px] text-muted-foreground hover:bg-accent/70 hover:text-foreground',
+                  selectedId === track.id &&
+                    'bg-primary/12 text-primary ring-1 ring-inset ring-primary/20'
+                )}
+              >
+                <AudioWaveform className="size-3.5" />
+                <span className="min-w-0 flex-1 truncate">{track.name}</span>
+                <span className="text-[9px]">{track.durationSeconds.toFixed(1)}s</span>
+              </button>
+            ))}
+            {artwork ? (
+              <div className="mt-2 border-t border-border/60 pt-2">
+                <div className="flex h-7 items-center gap-2 px-3 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <Bone className="size-3.5" /> Rig bones
+                </div>
+                {bones.map((bone) => (
+                  <TreeRow
+                    key={bone.id}
+                    node={{
+                      id: bone.id,
+                      name: bone.name,
+                      type: 'bone',
+                      depth: bone.parentId ? 2 : 1
+                    }}
+                    selected={selectedId === bone.id}
+                    onSelect={() => onSelect(bone.id)}
+                  />
+                ))}
+              </div>
+            ) : null}
           </ScrollArea>
         </TabsContent>
 

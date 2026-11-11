@@ -1,6 +1,8 @@
 export type * from './animation'
 export type * from './artwork'
+export type * from './audio'
 export type * from './editor'
 export type * from './geometry'
+export type * from './mesh'
 export type * from './project'
 export type * from './rig'

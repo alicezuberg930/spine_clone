@@ -40,6 +40,11 @@ import {
 interface EditorMenubarProps {
   onNewProject: () => void
   onImportArtwork: () => void
+  onImportAudio: () => void
+  onSaveProject: () => void
+  onExportData: () => void
+  onExportImages: () => void
+  onExportVideo: () => void
   onFeatureNotImplemented: (feature: string) => void
   onInsertKey: () => void
   onResetDemo: () => void
@@ -55,6 +60,11 @@ interface EditorMenubarProps {
 export function EditorMenubar({
   onNewProject,
   onImportArtwork,
+  onImportAudio,
+  onSaveProject,
+  onExportData,
+  onExportImages,
+  onExportVideo,
   onFeatureNotImplemented,
   onInsertKey,
   onResetDemo,
@@ -89,9 +99,12 @@ export function EditorMenubar({
               <MenubarItem onClick={onImportArtwork}>
                 <Layers3 /> Layered artwork / PSD…
               </MenubarItem>
+              <MenubarItem onClick={onImportAudio}>
+                <AudioLines /> Audio file
+              </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>
-          <MenubarItem onClick={() => onFeatureNotImplemented('Save project')}>
+          <MenubarItem onClick={onSaveProject}>
             <Save /> Save project
             <MenubarShortcut>Ctrl+S</MenubarShortcut>
           </MenubarItem>
@@ -100,13 +113,13 @@ export function EditorMenubar({
               <FileDown /> Export
             </MenubarSubTrigger>
             <MenubarSubContent className="w-56">
-              <MenubarItem onClick={() => onFeatureNotImplemented('Export skeleton data')}>
-                <FileJson /> Skeleton data
+              <MenubarItem onClick={onExportData}>
+                <FileJson /> Runtime data (JSON)
               </MenubarItem>
-              <MenubarItem onClick={() => onFeatureNotImplemented('Export image sequence or GIF')}>
-                <FileImage /> Image sequence / GIF
+              <MenubarItem onClick={onExportImages}>
+                <FileImage /> Current frame (PNG)
               </MenubarItem>
-              <MenubarItem onClick={() => onFeatureNotImplemented('Export video')}>
+              <MenubarItem onClick={onExportVideo}>
                 <Frame /> Video
               </MenubarItem>
               <MenubarItem onClick={() => onFeatureNotImplemented('Export texture atlas')}>

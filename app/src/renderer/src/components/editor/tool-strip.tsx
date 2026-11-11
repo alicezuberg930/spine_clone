@@ -46,7 +46,7 @@ const primaryTools: Array<{
   { id: 'translate', label: 'Translate', shortcut: 'T', icon: Move, implemented: true },
   { id: 'rotate', label: 'Rotate', shortcut: 'R', icon: RotateCw, implemented: true },
   { id: 'scale', label: 'Scale', shortcut: 'E', icon: Scaling, implemented: true },
-  { id: 'pose', label: 'Pose / IK', shortcut: 'P', icon: Hand, implemented: false }
+  { id: 'pose', label: 'Pose / IK', shortcut: 'P', icon: Hand, implemented: true }
 ]
 
 const geometryTools: Array<{
@@ -56,9 +56,10 @@ const geometryTools: Array<{
   icon: typeof PenTool
   implemented: boolean
 }> = [
-  { id: 'mesh', label: 'Edit mesh', shortcut: 'M', icon: PenTool, implemented: false },
-  { id: 'weights', label: 'Paint weights', shortcut: 'W', icon: Blend, implemented: false },
-  { id: 'clipping', label: 'Edit clipping', shortcut: 'C', icon: Crop, implemented: false },
+  { id: 'mesh', label: 'Edit mesh', shortcut: 'M', icon: PenTool, implemented: true },
+  { id: 'deform', label: 'Deform mesh', shortcut: 'D', icon: Waypoints, implemented: true },
+  { id: 'weights', label: 'Paint weights', shortcut: 'W', icon: Blend, implemented: true },
+  { id: 'clipping', label: 'Edit clipping', shortcut: 'C', icon: Crop, implemented: true },
   { id: 'bounds', label: 'Edit bounds', shortcut: 'B', icon: BoxSelect, implemented: false }
 ]
 
