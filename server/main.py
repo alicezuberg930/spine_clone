@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 
-from app.routers.image_router import router as image_router
 from fastapi import FastAPI
 
-from app.services.inference_service import inference_service
+from server.image_router import router as image_router
+from server.inference_service import inference_service
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

@@ -1,12 +1,14 @@
 import io
 import logging
 import zipfile
+from typing import Annotated
 
 import torch
-from app.services.inference_service import inference_service
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from PIL import Image, UnidentifiedImageError
+
+from server.inference_service import inference_service
 
 router = APIRouter(prefix="/api/v1/layers", tags=["Image Layers"])
 logger = logging.getLogger(__name__)
@@ -14,11 +16,11 @@ logger = logging.getLogger(__name__)
 
 @router.post("/decompose")
 def decompose_image(
-    file: UploadFile = File(...),
-    layers: int = Form(4, ge=2, le=10),
-    seed: int = Form(777),
-    steps: int = Form(50, ge=1, le=50),
-    resolution: int = Form(640, ge=64, le=1024),
+    file: Annotated[UploadFile, File()],
+    layers: Annotated[int, Form(ge=2, le=10)] = 4,
+    seed: Annotated[int, Form()] = 777,
+    steps: Annotated[int, Form(ge=1, le=50)] = 50,
+    resolution: Annotated[int, Form(ge=64, le=1024)] = 640,
 ):
 
     try:
@@ -31,11 +33,7 @@ def decompose_image(
 
     try:
         layer_images = inference_service.decompose(
-            image=image,
-            layers=layers,
-            seed=seed,
-            steps=steps,
-            resolution=resolution
+            image=image, layers=layers, seed=seed, steps=steps, resolution=resolution
         )
 
         zip_buffer = io.BytesIO()
@@ -43,9 +41,7 @@ def decompose_image(
         with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
             for index, layer_image in enumerate(layer_images, start=1):
                 image_buffer = io.BytesIO()
-
                 layer_image.save(image_buffer, format="PNG")
-
                 zip_file.writestr(f"layer_{index:02d}.png", image_buffer.getvalue())
 
         zip_buffer.seek(0)
