@@ -42,7 +42,7 @@ export function BoneBindingCombobox({
       />
       <ComboboxContent className="min-w-52">
         <ComboboxEmpty>No matching bones.</ComboboxEmpty>
-        <ComboboxList className="max-h-56 overflow-y-scroll pr-1 [scrollbar-width:thin]">
+        <ComboboxList className="max-h-56 overflow-y-scroll pr-1 scrollbar-thin">
           {(option: BoneBindingOption) => (
             <ComboboxItem key={option.value ?? 'unbound'} value={option} className="text-xs">
               <span className="truncate">{option.label}</span>

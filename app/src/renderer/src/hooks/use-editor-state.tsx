@@ -52,6 +52,12 @@ import {
 } from '@/lib/skeleton-geometry'
 import { deleteBoneFromEditorState } from '@/lib/bone-deletion'
 import { boneNameValidationError, normalizeBoneName } from '@/lib/bone-naming'
+import {
+  activateAnimation,
+  createAnimation,
+  deleteAnimation,
+  renameAnimation
+} from '@/lib/animation-management'
 
 function updateArtworkLayer(
   project: EditorProject,
@@ -106,9 +112,6 @@ export function evaluateLayerDeformation(
     (frame - previous.frame) / (next.frame - previous.frame)
   )
 }
-
-const getAnimation = (state: EditorState, id = state.activeAnimation): Animation | undefined =>
-  state.project.animations.find((animation) => animation.id === id)
 
 export const createInitialEditorState = (): EditorState => {
   const project = createEmptyProject()
@@ -166,6 +169,9 @@ type EditorAction =
   | { type: 'set-timeline-view'; view: TimelineView }
   | { type: 'set-active-skin'; id: string }
   | { type: 'set-active-animation'; id: string }
+  | { type: 'create-animation'; name: string }
+  | { type: 'rename-animation'; id: string; name: string }
+  | { type: 'delete-animation'; id: string }
   | { type: 'configure-project'; name: string; width: number; height: number; fps: number }
   | { type: 'set-artwork'; artwork: ArtworkDocument }
   | { type: 'create-bone'; parentId: string | null; start: Point; end: Point }
@@ -381,20 +387,14 @@ const editorReducer = (state: EditorState, action: EditorAction): EditorState =>
         ? { ...state, activeSkin: action.id }
         : state
     case 'set-active-animation': {
-      const animation = getAnimation(state, action.id)
-      if (!animation) return state
-
-      return {
-        ...state,
-        activeAnimation: animation.id,
-        frame: 0,
-        fps: animation.fps,
-        duration: animation.duration,
-        loop: animation.loop,
-        isPlaying: false,
-        keyframes: structuredClone(animation.keyframes)
-      }
+      return activateAnimation(state, action.id)
     }
+    case 'create-animation':
+      return createAnimation(state, action.name)
+    case 'rename-animation':
+      return renameAnimation(state, action.id, action.name)
+    case 'delete-animation':
+      return deleteAnimation(state, action.id)
     case 'configure-project': {
       const next = createInitialEditorState()
       const id = `project-${Date.now().toString(36)}`
@@ -952,6 +952,9 @@ export interface EditorActions {
   setTimelineView: (view: TimelineView) => void
   setActiveSkin: (id: string) => void
   setActiveAnimation: (id: string) => void
+  createAnimation: (name: string) => void
+  renameAnimation: (id: string, name: string) => void
+  deleteAnimation: (id: string) => void
   configureProject: (name: string, width: number, height: number, fps: number) => void
   setArtwork: (artwork: ArtworkDocument) => void
   createBone: (parentId: string | null, start: Point, end: Point) => void
@@ -1039,6 +1042,9 @@ export const EditorProvider = ({ children }: PropsWithChildren): React.JSX.Eleme
       setTimelineView: (view) => dispatch({ type: 'set-timeline-view', view }),
       setActiveSkin: (id) => dispatch({ type: 'set-active-skin', id }),
       setActiveAnimation: (id) => dispatch({ type: 'set-active-animation', id }),
+      createAnimation: (name) => dispatch({ type: 'create-animation', name }),
+      renameAnimation: (id, name) => dispatch({ type: 'rename-animation', id, name }),
+      deleteAnimation: (id) => dispatch({ type: 'delete-animation', id }),
       configureProject: (name, width, height, fps) =>
         dispatch({ type: 'configure-project', name, width, height, fps }),
       setArtwork: (artwork) => dispatch({ type: 'set-artwork', artwork }),

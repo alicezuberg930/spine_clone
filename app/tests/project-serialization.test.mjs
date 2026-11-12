@@ -189,6 +189,8 @@ test('round-trips a complete project and restores durable workspace state', () =
   assert.equal(restored.project.audioTracks[0].dataUrl, 'data:audio/wav;base64,UklGRg==')
   assert.deepEqual(restored.project.bones[0].transform, transform)
   assert.equal(restored.activeAnimation, 'animation-b')
+  assert.deepEqual(restored.project.animations[0].keyframes, [])
+  assert.deepEqual(restored.project.animations[1].keyframes, [keyframe])
   assert.equal(restored.activeSkin, 'skin-b')
   assert.equal(restored.fps, 24)
   assert.equal(restored.duration, 20)

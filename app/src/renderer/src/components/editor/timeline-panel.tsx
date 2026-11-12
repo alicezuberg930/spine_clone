@@ -151,7 +151,7 @@ function Dopesheet({
             </div>
           ))}
         </div>
-        <div className="timeline-grid relative h-[168px] min-w-0">
+        <div className="timeline-grid relative h-42 min-w-0">
           {tracks.map((track) => (
             <div key={track.id} className="relative h-7 border-b border-border/35">
               {keyframes
@@ -182,7 +182,7 @@ function Dopesheet({
           className="pointer-events-none absolute bottom-0 top-0 z-20 w-px bg-primary shadow-[0_0_8px_rgba(69,214,189,0.55)]"
           style={{ left: `${(frame / duration) * 100}%` }}
         >
-          <div className="absolute -left-[4px] top-0 size-2 rotate-45 rounded-[1px] bg-primary" />
+          <div className="absolute -left-1 top-0 size-2 rotate-45 rounded-[1px] bg-primary" />
         </div>
       </div>
     </div>
@@ -396,7 +396,7 @@ function AudioTimeline({
           <span className="ml-auto text-[9px] text-muted-foreground">Preview mix</span>
           <Switch size="sm" checked={enabled} onCheckedChange={onEnabledChange} />
         </div>
-        <div className="relative flex min-h-0 flex-1 items-center gap-[2px] overflow-hidden px-3">
+        <div className="relative flex min-h-0 flex-1 items-center gap-0.5 overflow-hidden px-3">
           <span
             className="pointer-events-none absolute bottom-2 top-2 rounded border border-primary/20 bg-primary/5"
             style={{ left: `${clipLeft}%`, width: `${clipWidth}%` }}
@@ -405,7 +405,7 @@ function AudioTimeline({
             <span
               key={index}
               className={cn(
-                'min-w-[2px] flex-1 rounded-full',
+                'min-w-0.5 flex-1 rounded-full',
                 enabled && !track.muted ? 'bg-primary/65' : 'bg-muted-foreground/25'
               )}
               style={{ height: `${Math.max(3, Math.min(82, height * 82))}%` }}
@@ -587,7 +587,7 @@ export function TimelinePanel({
       </div>
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        {view === 'dopesheet' ? (
+        {view === 'dopesheet' && (
           <Dopesheet
             frame={frame}
             duration={duration}
@@ -595,16 +595,16 @@ export function TimelinePanel({
             keyframes={keyframes}
             onFrameChange={onFrameChange}
           />
-        ) : null}
-        {view === 'graph' ? (
+        )}
+        {view === 'graph' && (
           <GraphEditor
             frame={frame}
             duration={duration}
             keyframes={keyframes}
             onFrameChange={onFrameChange}
           />
-        ) : null}
-        {view === 'audio' ? (
+        )}
+        {view === 'audio' && (
           <AudioTimeline
             tracks={audioTracks}
             selectedTrackId={selectedAudioTrackId}
@@ -618,7 +618,7 @@ export function TimelinePanel({
             onRemove={onAudioRemove}
             onImport={onImportAudio}
           />
-        ) : null}
+        )}
       </div>
 
       <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border/70 bg-[#101920] px-2 text-[9px] text-muted-foreground">

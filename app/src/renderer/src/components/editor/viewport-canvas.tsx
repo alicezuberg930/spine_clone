@@ -800,23 +800,23 @@ export function ViewportCanvas({
           ) : (
             <span className="text-[10px] text-muted-foreground">{bones.length} bones</span>
           )}
-          {flags.snap ? <Magnet className="size-3 text-primary" /> : null}
-          {selectedId ? (
+          {flags.snap && <Magnet className="size-3 text-primary" />}
+          {selectedId && (
             <span className="text-[9px] text-muted-foreground">
               {Math.round(transform.x)}, {Math.round(transform.y)}
             </span>
-          ) : null}
+          )}
         </div>
-        {isPlaying ? (
+        {isPlaying && (
           <div className="rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-[10px] text-primary">
             Previewing · {playProgress}%
           </div>
-        ) : null}
-        {selectedIds.length > 1 ? (
+        )}
+        {selectedIds.length > 1 && (
           <div className="rounded-md border border-primary/20 bg-primary/10 px-2 py-1 text-[10px] text-primary">
             {selectedIds.length} parts selected
           </div>
-        ) : null}
+        )}
       </div>
     </section>
   )

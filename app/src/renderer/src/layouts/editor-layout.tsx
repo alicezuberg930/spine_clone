@@ -3,6 +3,8 @@ import { CheckCircle2, X } from 'lucide-react'
 
 import { FeatureNotImplementedDialog } from '@/components/editor/dialogs/feature-not-implemented-dialog'
 import { AudioImportDialog } from '@/components/editor/dialogs/audio-import-dialog'
+import { AnimationNameDialog } from '@/components/editor/dialogs/animation-name-dialog'
+import { DeleteAnimationDialog } from '@/components/editor/dialogs/delete-animation-dialog'
 import { DeleteBoneDialog } from '@/components/editor/dialogs/delete-bone-dialog'
 import { LayeredArtworkDialog } from '@/components/editor/dialogs/layered-artwork-dialog'
 import { RenameBoneDialog } from '@/components/editor/dialogs/rename-bone-dialog'
@@ -30,6 +32,11 @@ import { usePlayback } from '@/hooks/use-playback'
 import type { AudioTrack, BoneDeletionMode, EditorSelection, Transform, ViewFlag } from '@/@types'
 import { evaluateBoneTransforms } from '@/lib/bone-animation'
 import { boneNameValidationError, normalizeBoneName } from '@/lib/bone-naming'
+import {
+  animationNameValidationError,
+  nextAnimationName,
+  normalizeAnimationName
+} from '@/lib/animation-management'
 import { importArtworkFiles } from '@/lib/import-artwork'
 import { createDefaultClipping, createGridMesh, weightedMeshDeformation } from '@/lib/mesh-geometry'
 import { deserializeProject, serializeProject } from '@/lib/project-serialization'
@@ -50,6 +57,8 @@ function selectionFromId(id: string): EditorSelection {
   return { kind: 'skeleton', id }
 }
 
+type AnimationNameDialogState = { mode: 'create' } | { mode: 'rename'; animationId: string }
+
 export function EditorLayout(): React.JSX.Element {
   const { state, actions } = useEditorState()
   const selectedEntity = useSelectedEntity()
@@ -61,6 +70,11 @@ export function EditorLayout(): React.JSX.Element {
   const [pendingDeleteBoneId, setPendingDeleteBoneId] = useState<string | null>(null)
   const [pendingRenameBoneId, setPendingRenameBoneId] = useState<string | null>(null)
   const [renameBoneError, setRenameBoneError] = useState<string | null>(null)
+  const [animationNameDialog, setAnimationNameDialog] = useState<AnimationNameDialogState | null>(
+    null
+  )
+  const [animationNameError, setAnimationNameError] = useState<string | null>(null)
+  const [pendingDeleteAnimationId, setPendingDeleteAnimationId] = useState<string | null>(null)
   const [outputBusy, setOutputBusy] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
   const viewportSvgRef = useRef<SVGSVGElement | null>(null)
@@ -75,6 +89,16 @@ export function EditorLayout(): React.JSX.Element {
     : null
   const pendingRenameBone = pendingRenameBoneId
     ? (state.project.bones.find((bone) => bone.id === pendingRenameBoneId) ?? null)
+    : null
+  const pendingRenameAnimation =
+    animationNameDialog?.mode === 'rename'
+      ? (state.project.animations.find(
+          (animation) => animation.id === animationNameDialog.animationId
+        ) ?? null)
+      : null
+  const pendingDeleteAnimation = pendingDeleteAnimationId
+    ? (state.project.animations.find((animation) => animation.id === pendingDeleteAnimationId) ??
+      null)
     : null
   const pendingDeleteChildCount = pendingDeleteBone
     ? state.project.bones.filter((bone) => bone.parentId === pendingDeleteBone.id).length
@@ -249,6 +273,67 @@ export function EditorLayout(): React.JSX.Element {
     [actions, pendingRenameBone, state.project.bones]
   )
 
+  const requestAnimationCreate = useCallback((): void => {
+    setAnimationNameError(null)
+    setAnimationNameDialog({ mode: 'create' })
+  }, [])
+
+  const requestAnimationRename = useCallback(
+    (animationId: string): void => {
+      if (!state.project.animations.some((animation) => animation.id === animationId)) return
+      setAnimationNameError(null)
+      setAnimationNameDialog({ mode: 'rename', animationId })
+    },
+    [state.project.animations]
+  )
+
+  const confirmAnimationName = useCallback(
+    (value: string): void => {
+      if (!animationNameDialog) return
+      const animationId =
+        animationNameDialog.mode === 'rename' ? animationNameDialog.animationId : null
+      const error = animationNameValidationError(state.project.animations, animationId, value)
+      if (error) {
+        setAnimationNameError(error)
+        return
+      }
+
+      const name = normalizeAnimationName(value)
+      if (animationNameDialog.mode === 'create') {
+        actions.createAnimation(name)
+        setNotice(`Created animation ${name}`)
+      } else if (pendingRenameAnimation && pendingRenameAnimation.name !== name) {
+        actions.renameAnimation(pendingRenameAnimation.id, name)
+        setNotice(`Renamed ${pendingRenameAnimation.name} to ${name}`)
+      }
+      setAnimationNameError(null)
+      setAnimationNameDialog(null)
+    },
+    [actions, animationNameDialog, pendingRenameAnimation, state.project.animations]
+  )
+
+  const requestAnimationDelete = useCallback(
+    (animationId: string): void => {
+      if (!state.project.animations.some((animation) => animation.id === animationId)) return
+      if (state.project.animations.length <= 1) {
+        setNotice('A project must contain at least one animation.')
+        return
+      }
+      setPendingDeleteAnimationId(animationId)
+    },
+    [state.project.animations]
+  )
+
+  const confirmAnimationDelete = useCallback((): void => {
+    if (!pendingDeleteAnimation) {
+      setPendingDeleteAnimationId(null)
+      return
+    }
+    actions.deleteAnimation(pendingDeleteAnimation.id)
+    setPendingDeleteAnimationId(null)
+    setNotice(`Deleted animation ${pendingDeleteAnimation.name}`)
+  }, [actions, pendingDeleteAnimation])
+
   const insertKey = useCallback((): void => {
     if (state.tool === 'deform' && selectedArtworkLayer) {
       actions.upsertKeyframe(
@@ -352,6 +437,9 @@ export function EditorLayout(): React.JSX.Element {
       setPendingDeleteBoneId(null)
       setPendingRenameBoneId(null)
       setRenameBoneError(null)
+      setAnimationNameDialog(null)
+      setAnimationNameError(null)
+      setPendingDeleteAnimationId(null)
       setNotice(`Opened ${loadedState.project.name} from ${result.filePath}`)
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'The project could not be opened.')
@@ -529,6 +617,9 @@ export function EditorLayout(): React.JSX.Element {
     setPendingDeleteBoneId(null)
     setPendingRenameBoneId(null)
     setRenameBoneError(null)
+    setAnimationNameDialog(null)
+    setAnimationNameError(null)
+    setPendingDeleteAnimationId(null)
     setNotice(`${values.name} created · ${values.width} × ${values.height}`)
   }
 
@@ -601,6 +692,12 @@ export function EditorLayout(): React.JSX.Element {
               onSelect={(id) => actions.select(selectionFromId(id))}
               onDeleteBone={requestBoneDelete}
               onRenameBone={requestBoneRename}
+              animations={state.project.animations}
+              activeAnimation={state.activeAnimation}
+              onAnimationCreate={requestAnimationCreate}
+              onAnimationChange={actions.setActiveAnimation}
+              onAnimationRename={requestAnimationRename}
+              onAnimationDelete={requestAnimationDelete}
               artwork={state.project.artwork}
               audioTracks={state.project.audioTracks}
               bones={state.project.bones}
@@ -814,6 +911,34 @@ export function EditorLayout(): React.JSX.Element {
             setRenameBoneError(null)
           }}
           onRename={confirmBoneRename}
+        />
+      ) : null}
+      {animationNameDialog ? (
+        <AnimationNameDialog
+          open
+          mode={animationNameDialog.mode}
+          initialName={
+            animationNameDialog.mode === 'create'
+              ? nextAnimationName(state.project.animations)
+              : (pendingRenameAnimation?.name ?? '')
+          }
+          error={animationNameError}
+          onOpenChange={(open) => {
+            if (open) return
+            setAnimationNameDialog(null)
+            setAnimationNameError(null)
+          }}
+          onSubmit={confirmAnimationName}
+        />
+      ) : null}
+      {pendingDeleteAnimation ? (
+        <DeleteAnimationDialog
+          open
+          animationName={pendingDeleteAnimation.name}
+          onOpenChange={(open) => {
+            if (!open) setPendingDeleteAnimationId(null)
+          }}
+          onDelete={confirmAnimationDelete}
         />
       ) : null}
       <NewProjectDialog

@@ -166,7 +166,7 @@ function ArtworkLayerInspector({
 
       <ScrollArea className="min-h-0 flex-1">
         <div className="space-y-4 p-3">
-          <div className="grid min-h-40 place-items-center overflow-hidden rounded-xl border border-border/70 bg-[linear-gradient(45deg,#111a20_25%,transparent_25%),linear-gradient(-45deg,#111a20_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#111a20_75%),linear-gradient(-45deg,transparent_75%,#111a20_75%)] bg-[length:16px_16px] bg-[position:0_0,0_8px,8px_-8px,-8px_0px] p-3">
+          <div className="grid min-h-40 place-items-center overflow-hidden rounded-xl border border-border/70 bg-[linear-gradient(45deg,#111a20_25%,transparent_25%),linear-gradient(-45deg,#111a20_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#111a20_75%),linear-gradient(-45deg,transparent_75%,#111a20_75%)] bg-size-[16px_16px] bg-position-[0_0,0_8px,8px_-8px,-8px_0px] p-3">
             <img
               src={layer.dataUrl}
               alt={`${layer.name} preview`}
@@ -458,7 +458,7 @@ function PhysicsSlider({
         step={max <= 10 ? 0.1 : 1}
         value={[value]}
         onValueChange={(next) => onChange(next[0] ?? value)}
-        className="[&_[data-slot=slider-range]]:bg-primary [&_[data-slot=slider-thumb]]:size-3"
+        className="**:data-[slot=slider-range]:bg-primary **:data-[slot=slider-thumb]:size-3"
       />
       <span className="text-right text-[10px] tabular-nums text-foreground/75">{value}</span>
     </div>
