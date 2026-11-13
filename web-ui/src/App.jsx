@@ -1,5 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+const SUPPORTED_IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
+
+function isSupportedImage(file) {
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  return SUPPORTED_IMAGE_TYPES.has(file.type) || SUPPORTED_IMAGE_EXTENSIONS.has(extension)
+}
+
 function ImageMark() {
   return (
     <svg
@@ -70,14 +79,47 @@ async function getErrorMessage(response) {
   return response.statusText || `Request failed (${response.status})`
 }
 
+function waitForNextPoll(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException('Request cancelled', 'AbortError'))
+      return
+    }
+
+    function handleAbort() {
+      window.clearTimeout(timeout)
+      reject(new DOMException('Request cancelled', 'AbortError'))
+    }
+
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener('abort', handleAbort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', handleAbort, { once: true })
+  })
+}
+
+function startArchiveDownload(archive) {
+  const downloadUrl = URL.createObjectURL(archive)
+  const link = document.createElement('a')
+  link.href = downloadUrl
+  link.download = 'see-through-layers.zip'
+  document.body.append(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
+}
+
 function App() {
   const inputRef = useRef(null)
+  const requestRef = useRef(null)
   const [file, setFile] = useState(null)
   const [previewUrl, setPreviewUrl] = useState('')
-  const [layers, setLayers] = useState('4')
-  const [seed, setSeed] = useState('777')
-  const [steps, setSteps] = useState('50')
+  const [resolution, setResolution] = useState('1024')
+  const [splitLeftRight, setSplitLeftRight] = useState(false)
+  const [includeIntermediates, setIncludeIntermediates] = useState(true)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [jobStatus, setJobStatus] = useState(null)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
 
@@ -92,14 +134,25 @@ function App() {
     return () => URL.revokeObjectURL(url)
   }, [file])
 
+  useEffect(() => {
+    return () => requestRef.current?.abort()
+  }, [])
+
   function chooseFile(nextFile) {
     setError('')
     setSuccess('')
+    setJobStatus(null)
     if (!nextFile) return
 
-    if (!nextFile.type.startsWith('image/')) {
+    if (!isSupportedImage(nextFile)) {
       setFile(null)
-      setError('Please choose a valid image file.')
+      setError('Choose a PNG, JPG, or WebP character image.')
+      return
+    }
+
+    if (nextFile.size > MAX_UPLOAD_BYTES) {
+      setFile(null)
+      setError('Choose an image smaller than 25 MB.')
       return
     }
 
@@ -118,48 +171,105 @@ function App() {
 
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('layers', layers)
-    formData.append('seed', seed)
-    formData.append('steps', steps)
+    formData.append('resolution', resolution)
+    formData.append('split_left_right', String(splitLeftRight))
+    formData.append('include_intermediates', String(includeIntermediates))
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
     setIsSubmitting(true)
+    setJobStatus({
+      status: 'uploading',
+      stage: 'uploading',
+      message: 'Uploading and validating the image',
+      progress: 1,
+      stage_progress: null,
+      current: null,
+      total: null
+    })
 
     try {
-      const response = await fetch('/api/v1/layers/decompose', {
+      const response = await fetch('/api/v1/characters/decompose', {
         method: 'POST',
-        body: formData
+        body: formData,
+        signal: controller.signal
       })
 
       if (!response.ok) {
         throw new Error(await getErrorMessage(response))
       }
 
-      const archive = await response.blob()
+      let snapshot = await response.json()
+      setJobStatus(snapshot)
+
+      while (snapshot.status === 'queued' || snapshot.status === 'running') {
+        await waitForNextPoll(snapshot.retry_after_ms ?? 1000, controller.signal)
+        const statusResponse = await fetch(snapshot.status_url, {
+          signal: controller.signal,
+          cache: 'no-store'
+        })
+        if (!statusResponse.ok) {
+          throw new Error(await getErrorMessage(statusResponse))
+        }
+        snapshot = await statusResponse.json()
+        setJobStatus(snapshot)
+      }
+
+      if (snapshot.status === 'failed') {
+        throw new Error(snapshot.error || 'Character decomposition failed.')
+      }
+      if (snapshot.status !== 'complete' || !snapshot.download_url) {
+        throw new Error('The decomposition job ended without a download.')
+      }
+
+      const downloadResponse = await fetch(snapshot.download_url, {
+        signal: controller.signal,
+        cache: 'no-store'
+      })
+      if (!downloadResponse.ok) {
+        throw new Error(await getErrorMessage(downloadResponse))
+      }
+      const archive = await downloadResponse.blob()
       if (
         archive.size === 0 ||
         !['application/zip', 'application/x-zip-compressed'].includes(
-          response.headers.get('content-type')?.split(';')[0].trim() ?? ''
+          downloadResponse.headers.get('content-type')?.split(';')[0].trim() ?? ''
         )
       ) {
         throw new Error('The server did not return a valid layers ZIP file.')
       }
 
-      const downloadUrl = URL.createObjectURL(archive)
-      const link = document.createElement('a')
-      link.href = downloadUrl
-      link.download = 'image_layers.zip'
-      document.body.append(link)
-      link.click()
-      link.remove()
-      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000)
-      setSuccess('Your layers are ready. The ZIP download has started.')
+      startArchiveDownload(archive)
+      setSuccess('Your character layers are ready. The ZIP download has started.')
     } catch (requestError) {
-      setError(
+      if (requestError?.name === 'AbortError') {
+        return
+      }
+      const failureMessage =
         requestError instanceof Error
           ? requestError.message
-          : 'Something went wrong while separating the image.'
-      )
+          : 'Something went wrong while separating the character.'
+      setJobStatus((current) => {
+        if (current?.status === 'complete' || current?.status === 'failed') {
+          return current
+        }
+        return {
+          ...current,
+          status: 'failed',
+          stage: 'failed',
+          message: failureMessage,
+          error: failureMessage,
+          stage_progress: null,
+          current: null,
+          total: null
+        }
+      })
+      setError(failureMessage)
     } finally {
-      setIsSubmitting(false)
+      if (requestRef.current === controller) {
+        requestRef.current = null
+        setIsSubmitting(false)
+      }
     }
   }
 
@@ -167,45 +277,39 @@ function App() {
     setFile(null)
     setError('')
     setSuccess('')
+    setJobStatus(null)
     if (inputRef.current) inputRef.current.value = ''
   }
 
   return (
     <div className="app-shell">
-      <header className="topbar">
-        <a className="brand" href="/" aria-label="Layered home">
-          <ImageMark />
-          <span>layered</span>
-        </a>
-        <div className="topbar-note">
-          <span className="status-dot" />
-          <span>AI image tools</span>
-        </div>
-      </header>
-
       <main className="main-content">
         <section className="intro" aria-labelledby="page-title">
           <div className="eyebrow">
             <SparkleIcon />
-            <span>IMAGE TO LAYERS</span>
+            <span>CHARACTER TO LAYERS</span>
           </div>
           <h1 id="page-title">
-            Every image has
+            One character.
             <br />
-            <span>more than one layer.</span>
+            <span>Every part editable.</span>
           </h1>
           <p className="intro-copy">
-            Turn a single image into separate, editable layers. Upload your
-            image and let AI do the careful work.
+            Separate an anime character into semantically named, depth-ordered
+            layers with reconstructed hidden regions.
           </p>
         </section>
 
-        <section className="workspace" aria-label="Image layer separator">
-          <form className="upload-card" onSubmit={handleSubmit}>
+        <section aria-label="Character layer separator">
+          <form
+            className="upload-card"
+            onSubmit={handleSubmit}
+            aria-busy={isSubmitting}
+          >
             <div className="card-heading">
               <div>
                 <p className="step-label">01 / UPLOAD</p>
-                <h2>Your starting image</h2>
+                <h2>Your character artwork</h2>
               </div>
               {file && (
                 <button
@@ -223,14 +327,11 @@ function App() {
               <div className="image-preview">
                 <img src={previewUrl} alt={`Preview of ${file.name}`} />
                 <div className="file-details">
-                  <span className="file-badge">IMAGE</span>
+                  <span className="file-badge">CHARACTER</span>
                   <div className="file-copy">
                     <span className="file-name">{file.name}</span>
                     <span className="file-size">{formatFileSize(file.size)}</span>
                   </div>
-                  <span className="check-mark" aria-label="Image selected">
-                    ✓
-                  </span>
                 </div>
               </div>
             ) : (
@@ -248,7 +349,7 @@ function App() {
                   id="image-file"
                   name="file"
                   type="file"
-                  accept="image/*"
+                  accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
                   onChange={(event) => chooseFile(event.target.files?.[0])}
                   disabled={isSubmitting}
                 />
@@ -258,57 +359,114 @@ function App() {
             <div className="options-heading">
               <div>
                 <p className="step-label">02 / OPTIONS</p>
-                <h2>Make it yours</h2>
+                <h2>Character output</h2>
               </div>
             </div>
             <div className="options-grid">
-              <label className="option-field" htmlFor="layers">
-                <span>Layers</span>
-                <input
-                  id="layers"
-                  name="layers"
-                  type="number"
-                  min="2"
-                  max="10"
-                  step="1"
-                  value={layers}
-                  onChange={(event) => setLayers(event.target.value)}
+              <label className="option-field" htmlFor="resolution">
+                <span>Output quality</span>
+                <select
+                  id="resolution"
+                  name="resolution"
+                  value={resolution}
+                  onChange={(event) => setResolution(event.target.value)}
                   disabled={isSubmitting}
-                  required
-                />
-                <small>2–10 layers</small>
+                >
+                  <option value="768">Fast · 768 px</option>
+                  <option value="1024">Detailed · 1024 px</option>
+                </select>
+                <small>1024 px recommended</small>
               </label>
-              <label className="option-field" htmlFor="seed">
-                <span>Seed</span>
+              <label className="option-toggle" htmlFor="split-left-right">
                 <input
-                  id="seed"
-                  name="seed"
-                  type="number"
-                  step="1"
-                  value={seed}
-                  onChange={(event) => setSeed(event.target.value)}
+                  id="split-left-right"
+                  name="split_left_right"
+                  type="checkbox"
+                  checked={splitLeftRight}
+                  onChange={(event) => setSplitLeftRight(event.target.checked)}
                   disabled={isSubmitting}
-                  required
                 />
-                <small>Controls variation</small>
+                <span>
+                  <strong>Split paired features</strong>
+                  <small>Separate left and right details</small>
+                </span>
               </label>
-              <label className="option-field" htmlFor="steps">
-                <span>Steps</span>
+              <label className="option-toggle" htmlFor="include-intermediates">
                 <input
-                  id="steps"
-                  name="steps"
-                  type="number"
-                  min="1"
-                  max="50"
-                  step="1"
-                  value={steps}
-                  onChange={(event) => setSteps(event.target.value)}
+                  id="include-intermediates"
+                  name="include_intermediates"
+                  type="checkbox"
+                  checked={includeIntermediates}
+                  onChange={(event) => setIncludeIntermediates(event.target.checked)}
                   disabled={isSubmitting}
-                  required
                 />
-                <small>1–50 steps</small>
+                <span>
+                  <strong>Include intermediate files</strong>
+                  <small>Add PNG layers and supporting files</small>
+                </span>
               </label>
             </div>
+
+            {jobStatus && (
+              <section
+                className={`progress-panel progress-${jobStatus.status}`}
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <div className="progress-heading">
+                  <div>
+                    <span className="progress-kicker">LIVE PROGRESS</span>
+                    <strong>{jobStatus.message}</strong>
+                  </div>
+                  <span className="progress-percent">
+                    {Math.round(jobStatus.progress ?? 0)}%
+                  </span>
+                </div>
+                <div
+                  className={`progress-bar ${isSubmitting && jobStatus.stage_progress == null
+                    ? 'is-indeterminate'
+                    : ''
+                    }`}
+                  role="progressbar"
+                  aria-label={jobStatus.message}
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow={
+                    isSubmitting && jobStatus.stage_progress == null
+                      ? undefined
+                      : Math.round(jobStatus.progress ?? 0)
+                  }
+                >
+                  <span
+                    className="progress-fill"
+                    style={
+                      isSubmitting && jobStatus.stage_progress == null
+                        ? undefined
+                        : { width: `${Math.round(jobStatus.progress ?? 0)}%` }
+                    }
+                  />
+                </div>
+                <div className="progress-meta">
+                  <span>{jobStatus.stage?.replaceAll('_', ' ')}</span>
+                  <span>
+                    {jobStatus.current != null && jobStatus.total != null
+                      ? `${jobStatus.current} / ${jobStatus.total} steps`
+                      : jobStatus.status === 'complete'
+                        ? 'Download ready'
+                        : 'Working…'}
+                  </span>
+                </div>
+                {jobStatus.status === 'complete' && jobStatus.download_url && (
+                  <a
+                    className="progress-download"
+                    href={jobStatus.download_url}
+                    download="see-through-layers.zip"
+                  >
+                    Download ZIP again
+                  </a>
+                )}
+              </section>
+            )}
 
             {error && (
               <p className="feedback error-message" role="alert">
@@ -330,8 +488,8 @@ function App() {
             >
               {isSubmitting ? (
                 <>
-                  <span className="spinner" />
-                  Separating your image…
+                  <span className="spinner" aria-hidden="true" />
+                  Processing layers…
                 </>
               ) : (
                 <>
@@ -343,47 +501,16 @@ function App() {
                 </>
               )}
             </button>
-            <p className="privacy-note">
-              Your image is processed securely and isn’t stored.
+            <p className="privacy-note" role="status" aria-live="polite">
+              {isSubmitting
+                ? 'Live progress refreshes every second. Keep this tab open for the download.'
+                : 'Completed job files remain available temporarily for download.'}
             </p>
           </form>
-
-          <aside className="process-card" aria-label="How it works">
-            <div className="process-art" aria-hidden="true">
-              <div className="art-glow" />
-              <div className="art-image art-image-back">
-                <span />
-                <span />
-              </div>
-              <div className="art-image art-image-middle">
-                <span />
-                <span />
-              </div>
-              <div className="art-image art-image-front">
-                <span />
-                <span />
-              </div>
-              <div className="art-sparkle sparkle-one">✳</div>
-              <div className="art-sparkle sparkle-two">✦</div>
-            </div>
-            <div className="process-copy">
-              <p className="step-label">A LITTLE MAGIC</p>
-              <h2>One image in.<br />A world of layers out.</h2>
-              <p>
-                Your image is thoughtfully separated into transparent PNG
-                layers, bundled together and ready to use.
-              </p>
-            </div>
-            <div className="output-chip">
-              <span className="chip-icon">↓</span>
-              <span>Transparent PNG layers</span>
-              <span className="chip-type">.ZIP</span>
-            </div>
-          </aside>
         </section>
 
         <footer className="page-footer">
-          <span>Made for the details that make an image yours.</span>
+          <span>Prepared for editing, rigging, and animation workflows.</span>
           <span className="footer-mark">LAYERED IMAGE STUDIO</span>
         </footer>
       </main>

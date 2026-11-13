@@ -1,0 +1,7 @@
+# Install the upstream CUDA and inference requirements first; see API_README.md.
+fastapi==0.115.12
+python-multipart==0.0.20
+uvicorn[standard]==0.34.2
+python-dotenv==1.2.1
+httpx==0.28.1
+

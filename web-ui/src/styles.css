@@ -28,13 +28,15 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
 button:focus-visible,
 a:focus-visible,
-input:focus-visible + .drop-area {
+select:focus-visible,
+.drop-area:focus-within {
   outline: 3px solid #a7bba3;
   outline-offset: 3px;
 }
@@ -92,7 +94,7 @@ input:focus-visible + .drop-area {
 }
 
 .main-content {
-  width: min(1050px, 100%);
+  width: min(1280px, 100%);
   margin: 0 auto;
 }
 
@@ -146,13 +148,6 @@ h1 span {
   color: #74776f;
   font-size: 14px;
   line-height: 1.75;
-}
-
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
-  gap: 18px;
-  align-items: stretch;
 }
 
 .upload-card,
@@ -297,8 +292,9 @@ h1 span {
 
 .options-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 0.9fr 1.05fr 1.05fr;
   gap: 10px;
+  align-items: stretch;
 }
 
 .option-field {
@@ -311,7 +307,7 @@ h1 span {
   font-weight: 600;
 }
 
-.option-field input {
+.option-field select {
   width: 100%;
   min-width: 0;
   height: 38px;
@@ -323,30 +319,118 @@ h1 span {
   color: #30342e;
   font-size: 12px;
   font-weight: 600;
+  cursor: pointer;
   transition:
     border-color 150ms ease,
     box-shadow 150ms ease;
 }
 
-.option-field input:focus {
+.option-field select:focus {
   border-color: #8da18a;
   box-shadow: 0 0 0 3px rgba(125, 154, 118, 0.12);
 }
 
-.option-field input:disabled {
+.option-field select:disabled {
   color: #8b8e85;
   cursor: not-allowed;
 }
 
 .option-field small {
   color: #999c93;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 400;
+}
+
+.option-toggle {
+  min-width: 0;
+  min-height: 68px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid #e3e6df;
+  border-radius: 8px;
+  background: #fcfcfa;
+  color: #565a51;
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease;
+}
+
+.option-toggle:hover {
+  border-color: #bac9b6;
+  background: #f8faf5;
+}
+
+.option-toggle > input {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  outline: none;
+  background: #cfd5cc;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+
+.option-toggle > input::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(36, 39, 34, 0.18);
+  content: '';
+  transition: transform 150ms ease;
+}
+
+.option-toggle > input:checked {
+  background: var(--green);
+}
+
+.option-toggle > input:checked::after {
+  transform: translateX(14px);
+}
+
+.option-toggle > input:focus-visible {
+  box-shadow: 0 0 0 3px rgba(125, 154, 118, 0.2);
+}
+
+.option-toggle > input:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.option-toggle > span {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.option-toggle strong {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.option-toggle small {
+  color: #999c93;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1.3;
 }
 
 .image-preview {
   position: relative;
-  height: 255px;
+  height: 600px;
   overflow: hidden;
   border: 1px solid #e9eae5;
   border-radius: 11px;
@@ -422,6 +506,115 @@ h1 span {
   color: var(--green);
   font-size: 17px;
   font-weight: 600;
+}
+
+.progress-panel {
+  margin-top: 15px;
+  padding: 13px;
+  border: 1px solid #dfe5db;
+  border-radius: 9px;
+  background: #f8faf5;
+}
+
+.progress-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.progress-heading > div {
+  min-width: 0;
+}
+
+.progress-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: #879184;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.progress-heading strong {
+  display: block;
+  overflow: hidden;
+  color: #3d473c;
+  font-size: 12px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.progress-percent {
+  flex: 0 0 auto;
+  color: var(--green);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-bar {
+  position: relative;
+  height: 7px;
+  overflow: hidden;
+  margin-top: 12px;
+  border-radius: 999px;
+  background: #dde4d9;
+}
+
+.progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 280ms ease;
+}
+
+.progress-bar.is-indeterminate .progress-fill {
+  position: absolute;
+  width: 36%;
+  animation: progress-sweep 1.25s ease-in-out infinite;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 7px;
+  color: #8d9389;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-transform: capitalize;
+}
+
+.progress-download {
+  display: inline-flex;
+  margin-top: 10px;
+  color: var(--green-dark);
+  font-size: 10px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: rgba(65, 91, 66, 0.35);
+  text-underline-offset: 3px;
+}
+
+.progress-complete {
+  border-color: #cbd9c7;
+  background: #f4f8f1;
+}
+
+.progress-failed {
+  border-color: #e4c9c4;
+  background: #fbf5f3;
+}
+
+.progress-failed .progress-fill {
+  background: #a14d42;
+}
+
+.progress-failed .progress-percent {
+  color: #a14d42;
 }
 
 .feedback {
@@ -710,6 +903,36 @@ h1 span {
   }
 }
 
+@keyframes progress-sweep {
+  from {
+    transform: translateX(-120%);
+  }
+
+  to {
+    transform: translateX(310%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+
+  .submit-button,
+  .option-toggle,
+  .option-toggle > input,
+  .option-toggle > input::after,
+  .progress-fill {
+    transition: none;
+  }
+
+  .progress-bar.is-indeterminate .progress-fill {
+    width: 50%;
+    animation: none;
+    transform: none;
+  }
+}
+
 @media (min-width: 1300px) {
   .app-shell {
     padding-right: max(7.2%, calc((100% - 1180px) / 2));
@@ -794,10 +1017,11 @@ h1 span {
   }
 
   .options-grid {
-    gap: 7px;
+    grid-template-columns: 1fr;
+    gap: 9px;
   }
 
-  .option-field input {
+  .option-field select {
     padding: 0 7px;
   }
 
